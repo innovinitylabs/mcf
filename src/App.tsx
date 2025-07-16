@@ -301,10 +301,8 @@ export default function App() {
   
   // Backend URL toggle state
   const getDefaultBackendUrl = () => {
-    if (typeof window !== 'undefined' && window._env_ && window._env_.BACKEND_URL) {
-      return window._env_.BACKEND_URL;
-    }
-    return 'http://localhost:3000';
+    // Default to Render backend
+    return 'https://checks-of-time-beta.onrender.com';
   };
   const [backendUrl, setBackendUrl] = useState(getDefaultBackendUrl());
 
