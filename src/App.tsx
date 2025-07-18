@@ -300,7 +300,11 @@ export default function App() {
   const canvasContainerRef = useRef<HTMLDivElement>(null);
   
   // Backend URL toggle state
-  const [backendUrl, setBackendUrl] = useState('https://checks-of-time-beta.onrender.com');
+  const getDefaultBackendUrl = () => {
+    // Always default to Render backend
+    return 'https://checks-of-time-beta.onrender.com';
+  };
+  const [backendUrl, setBackendUrl] = useState(getDefaultBackendUrl());
 
   // Only generate a random palette when Random Madras is selected and none exists
   useEffect(() => {
