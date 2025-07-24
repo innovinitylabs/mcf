@@ -175,11 +175,12 @@ function PaletteSwatch({colors}:{colors:string[]}) {
 }
 
 // QQL-style custom palette picker
-function PaletteDropdown({palette, setPalette, groups, getColors}: {
+function PaletteDropdown({palette, setPalette, groups, getColors, paletteColors}: {
   palette: string | string[],
   setPalette: (p: string) => void,
   groups: { label: string, palettes: string[] }[],
-  getColors: (name: string) => string[]
+  getColors: (name: string) => string[],
+  paletteColors?: string[] | null
 }) {
   const [open, setOpen] = React.useState(false);
   const ref = React.useRef<HTMLDivElement>(null);
@@ -191,7 +192,7 @@ function PaletteDropdown({palette, setPalette, groups, getColors}: {
     return () => document.removeEventListener('mousedown', onClick);
   }, [open]);
   const paletteName = typeof palette === 'string' ? palette : 'Random Madras';
-  const selectedColors = paletteName === 'Random Madras' ? randomPalette() : (getColors(paletteName) || ['#ccc','#eee','#aaa','#fff']);
+  const selectedColors = paletteName === 'Random Madras' && paletteColors ? paletteColors : (getColors(paletteName) || ['#ccc','#eee','#aaa','#fff']);
   return (
     <div ref={ref} style={{position:'relative',marginBottom:8}}>
       <div
@@ -267,7 +268,7 @@ export default function App() {
   // State for config
   const [seed, setSeed] = useState(() => Array.from({length: 16}, () => Math.floor(Math.random()*16).toString(16)).join(''));
   const [palette, setPalette] = useState<string | string[]>(MADRAS_PALETTES[0]);
-  const [randomPaletteColors, setRandomPaletteColors] = useState<string[]>([]);
+  const [paletteColors, setPaletteColors] = useState<string[] | null>(null); // NEW: store actual colors if Random Madras
   const [lint, setLint] = useState(true);
   const [threadSpacing, setThreadSpacing] = useState(5);
   const [galleryOpen, setGalleryOpen] = useState(false);
@@ -306,42 +307,187 @@ export default function App() {
   };
   const [backendUrl, setBackendUrl] = useState(getDefaultBackendUrl());
 
+  // Bitcoin integration state
+  const [bitcoinMode, setBitcoinMode] = useState(false);
+  const [bitcoinSeedMode, setBitcoinSeedMode] = useState<'hash' | 'address' | 'none'>('none');
+  const [bitcoinHash, setBitcoinHash] = useState('');
+  const [bitcoinAddress, setBitcoinAddress] = useState('');
+  const [bitcoinDataMode, setBitcoinDataMode] = useState(false);
+  const [bitcoinDataParams, setBitcoinDataParams] = useState<string[]>(['blockHeight']);
+  const [dynamicFadeMode, setDynamicFadeMode] = useState(false);
+  const [priceBasedArt, setPriceBasedArt] = useState(false);
+  const [fadeLevel, setFadeLevel] = useState(1); // 1 = no fade, 0 = maximum fade
+  const [bitcoinData, setBitcoinData] = useState<any>(null);
+  
+  // Flag to prevent randomization when loading from URL
+  const [preserveCurrentConfig, setPreserveCurrentConfig] = useState(false);
+
+  // Add a flag to track if we loaded from URL
+  const [loadedFromURL, setLoadedFromURL] = useState(false);
+
+  const [pendingGeneration, setPendingGeneration] = useState(false);
+
+  const [modalArt, setModalArt] = useState<{ id: string; html: string; config: any; timestamp: number } | null>(null);
+  const [hasGeneratedFirstArt, setHasGeneratedFirstArt] = useState(false);
+  const [generationCounter, setGenerationCounter] = useState(0);
+  const generationInProgress = useRef(false);
+
   // Only generate a random palette when Random Madras is selected and none exists
   useEffect(() => {
-    if (palette === 'Random Madras' && randomPaletteColors.length === 0) {
-      setRandomPaletteColors(randomPalette());
+    if (palette === 'Random Madras' && !paletteColors) {
+      setPaletteColors(randomPalette());
     }
-    if (palette !== 'Random Madras' && randomPaletteColors.length > 0) {
-      setRandomPaletteColors([]);
+    if (palette !== 'Random Madras' && paletteColors) {
+      setPaletteColors(null);
     }
     // eslint-disable-next-line
   }, [palette]);
 
-  // Generate initial artwork when component mounts
+  // Load configuration from URL on component mount
   useEffect(() => {
-    if (artQueue.length === 0 && !isGenerating) {
-      generateNewArt();
+    if (!hasGeneratedFirstArt && artQueue.length === 0 && !isGenerating) {
+      const configLoaded = loadConfigFromURL();
+      if (!configLoaded) {
+        generateNewArt();
+      }
+      setHasGeneratedFirstArt(true);
     }
-  }, []);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []); // Only run once on mount
+
+  // Reset the flag if the queue is cleared
+  useEffect(() => {
+    if (artQueue.length === 0 && hasGeneratedFirstArt) {
+      // Only reset if we're not in the middle of initial load
+      setTimeout(() => {
+        setHasGeneratedFirstArt(false);
+      }, 100);
+    }
+  }, [artQueue.length, hasGeneratedFirstArt]);
+
+  // Fetch Bitcoin data and calculate fade when Bitcoin mode is enabled
+  useEffect(() => {
+    let intervalId: number;
+
+    const updateBitcoinData = async () => {
+      if (bitcoinMode && (bitcoinDataMode || dynamicFadeMode || priceBasedArt)) {
+        const data = await fetchBitcoinData();
+        if (data) {
+          // Store Bitcoin data for art generation
+          setBitcoinData(data);
+          
+          // Update fade level if dynamic fade is enabled
+          if (dynamicFadeMode && data.price) {
+            const newFadeLevel = calculatePriceFade(data.price);
+            setFadeLevel(newFadeLevel);
+          }
+        }
+      }
+    };
+
+    if (bitcoinMode && (bitcoinDataMode || dynamicFadeMode || priceBasedArt)) {
+      // Initial fetch
+      updateBitcoinData();
+      
+      // Set up interval to refresh data every 5 minutes for dynamic fade
+      if (dynamicFadeMode) {
+        intervalId = setInterval(updateBitcoinData, 5 * 60 * 1000);
+      }
+    } else {
+      // Reset fade level when Bitcoin mode is disabled
+      setFadeLevel(1);
+    }
+
+    return () => {
+      if (intervalId) {
+        clearInterval(intervalId);
+      }
+    };
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [bitcoinMode, bitcoinDataMode, dynamicFadeMode, priceBasedArt]);
+
+  // Update URL whenever configuration changes (manual adjustments only)
+  useEffect(() => {
+    if (loadedFromURL) {
+      // Skip updates when loading from URL
+      setLoadedFromURL(false);
+      return;
+    }
+    
+    // Only update URL for manual config changes, not during art generation
+    // (Art generation updates URL immediately in generateNewArt)
+    if (!isGenerating) {
+      const timeoutId = setTimeout(() => {
+        const config = {
+          seed,
+          palette,
+          threadSpacing,
+          bgColor,
+          lint,
+          weaveStyle,
+          opaque,
+          threadVariance: weaveStyle === 'classic' ? 0.3 : 0, // CRITICAL: include threadVariance
+          bitcoinMode,
+          bitcoinSeedMode,
+          bitcoinHash,
+          bitcoinAddress,
+          bitcoinDataMode,
+          bitcoinDataParams,
+          priceBasedArt,
+          dynamicFadeMode
+        };
+        updateURLWithConfig(config);
+      }, 100); // Small delay to batch updates
+      
+      return () => clearTimeout(timeoutId);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [seed, palette, threadSpacing, bgColor, lint, weaveStyle, opaque, 
+      bitcoinMode, bitcoinSeedMode, bitcoinHash, bitcoinAddress, 
+      bitcoinDataMode, bitcoinDataParams, priceBasedArt, dynamicFadeMode, isGenerating]);
+
+  // useEffect to trigger art generation after all config state is updated
+  useEffect(() => {
+    if (pendingGeneration && !generationInProgress.current) {
+      console.log('Pending generation triggered');
+      // Use the latest config
+      const config = getCurrentConfig();
+      generateNewArt(config);
+      setPendingGeneration(false);
+    }
+    // eslint-disable-next-line
+  }, [pendingGeneration]);
 
   // Function to generate new art and add to queue
-  const generateNewArt = async () => {
-    if (isGenerating) return;
-    
+  const generateNewArt = async (overrideConfig?: any) => {
+    if (isGenerating || generationInProgress.current) {
+      console.log('Already generating, skipping...');
+      return;
+    }
+    console.log('Starting art generation...');
+    generationInProgress.current = true;
     setIsGenerating(true);
-    const config = getCurrentConfig();
-    
+    const currentGeneration = generationCounter;
+    setGenerationCounter(prev => prev + 1);
+    let config;
+    if (overrideConfig) {
+      config = { ...overrideConfig };
+    } else {
+      config = getCurrentConfig();
+      // Always update URL immediately with the config used
+      updateURLWithConfig(config);
+    }
     // Handle Random Madras palette
     let paletteToSend: string | string[] = config.palette;
-    if (config.palette === 'Random Madras') {
-      paletteToSend = randomPaletteColors;
+    if (Array.isArray(config.palette)) {
+      paletteToSend = config.palette;
+    } else if (config.palette === 'Random Madras' && config.paletteColors) {
+      paletteToSend = config.paletteColors;
     }
-
     const finalConfig = {
       ...config,
       palette: paletteToSend
     };
-
     try {
       const res = await fetch(`${backendUrl}/generate`, {
         method: 'POST',
@@ -349,19 +495,19 @@ export default function App() {
         body: JSON.stringify(finalConfig),
       });
       const html = await res.text();
-      
       const newArt = {
-        id: Date.now().toString(),
+        id: `${Date.now()}_${currentGeneration}`,
         html,
         config: { ...finalConfig },
         timestamp: Date.now()
       };
-
       setArtQueue(prev => [...prev, newArt]);
       setCurrentArtIndex(prev => prev + 1);
+      console.log(`Art generation complete: ${newArt.id}`);
     } catch (e) {
       console.error('Failed to generate art:', e);
     } finally {
+      generationInProgress.current = false;
       setIsGenerating(false);
     }
   };
@@ -464,10 +610,6 @@ export default function App() {
     setCurrentArtIndex(artQueue.length - 1);
   };
 
-  const goToArt = (index: number) => {
-    setCurrentArtIndex(index);
-  };
-
   // Random generation functions
   const generateRandomSeed = () => {
     return Array.from({length: 16}, () => Math.floor(Math.random()*16).toString(16)).join('');
@@ -490,61 +632,295 @@ export default function App() {
     return Math.random() > 0.5 ? 'classic' : 'woven';
   };
 
+  // Bitcoin utility functions
+  const hashToPRNGSeed = (hashString: string): string => {
+    // Simple hash to hex seed conversion
+    if (!hashString) return generateRandomSeed();
+    
+    // Remove any non-hex characters and take first 16 characters
+    const cleanHash = hashString.replace(/[^a-fA-F0-9]/g, '').toLowerCase();
+    if (cleanHash.length >= 16) {
+      return cleanHash.substring(0, 16);
+    } else if (cleanHash.length > 0) {
+      // Pad with repeated hash if too short
+      const repeated = cleanHash.repeat(Math.ceil(16 / cleanHash.length));
+      return repeated.substring(0, 16);
+    } else {
+      return generateRandomSeed();
+    }
+  };
+
+  const addressToPRNGSeed = (address: string): string => {
+    // Convert Bitcoin address to deterministic seed
+    if (!address) return generateRandomSeed();
+    
+    // Simple deterministic conversion using charCodes
+    let hash = 0;
+    for (let i = 0; i < address.length; i++) {
+      const char = address.charCodeAt(i);
+      hash = ((hash << 5) - hash) + char;
+      hash = hash & hash; // Convert to 32-bit integer
+    }
+    
+    // Convert to hex and pad/repeat to 16 characters
+    const hexHash = Math.abs(hash).toString(16);
+    const repeated = hexHash.repeat(Math.ceil(16 / hexHash.length));
+    return repeated.substring(0, 16);
+  };
+
+  // Bitcoin API integration
+  const fetchBitcoinData = async () => {
+    try {
+      const [blockstreamData, mempoolData, priceData] = await Promise.all([
+        // Blockstream API for basic blockchain info
+        fetch('https://blockstream.info/api/blocks/tip/height').then(res => res.json()),
+        // Mempool.space for mempool and fees
+        fetch('https://mempool.space/api/v1/fees/recommended').then(res => res.json()),
+        // CoinGecko for price (only if price-based art is enabled)
+        priceBasedArt ? fetch('https://api.coingecko.com/api/v3/simple/price?ids=bitcoin&vs_currencies=usd&include_24hr_change=true').then(res => res.json()) : Promise.resolve(null)
+      ]);
+
+      return {
+        blockHeight: blockstreamData,
+        fees: mempoolData,
+        price: priceData?.bitcoin
+      };
+    } catch (error) {
+      console.error('Failed to fetch Bitcoin data:', error);
+      return null;
+    }
+  };
+
+  const calculatePriceFade = (priceData: any): number => {
+    if (!priceData || !priceData.usd_24h_change) return 1;
+    
+    const change24h = priceData.usd_24h_change;
+    
+    // Calculate fade based on price movement
+    // Positive change = brighter (fade level closer to 1)
+    // Negative change = more faded (fade level closer to 0)
+    
+    if (change24h > 0) {
+      // Green day - bright, fade level between 0.8 and 1.0
+      const brightness = Math.min(change24h / 10, 1); // Cap at 10% change
+      return 0.8 + (brightness * 0.2);
+    } else {
+      // Red day - faded, fade level between 0.3 and 1.0
+      const fadeAmount = Math.min(Math.abs(change24h) / 15, 1); // Cap at 15% change
+      return 1 - (fadeAmount * 0.7);
+    }
+  };
+
+  // Permalink utility functions (reversible config encoding)
+  const encodeConfigToString = (config: any): string => {
+    // Always include paletteColors if present
+    const minimalConfig = {
+      seed: config.seed,
+      palette: config.palette,
+      paletteColors: config.paletteColors || null,
+      threadSpacing: config.threadSpacing,
+      bgColor: config.bgColor,
+      lint: config.lint,
+      weaveStyle: config.weaveStyle,
+      opaque: config.opaque,
+      threadVariance: config.threadVariance || (config.weaveStyle === 'classic' ? 0.3 : 0),
+      bitcoinMode: config.bitcoinMode || false,
+      bitcoinSeedMode: config.bitcoinSeedMode || 'none',
+      bitcoinHash: config.bitcoinHash || '',
+      bitcoinAddress: config.bitcoinAddress || '',
+      bitcoinDataMode: config.bitcoinDataMode || false,
+      bitcoinDataParams: config.bitcoinDataParams || ['blockHeight'],
+      priceBasedArt: config.priceBasedArt || false,
+      dynamicFadeMode: config.dynamicFadeMode || false
+    };
+    return btoa(unescape(encodeURIComponent(JSON.stringify(minimalConfig))));
+  };
+
+  const decodeConfigFromString = (str: string): any => {
+    try {
+      const decoded = decodeURIComponent(escape(atob(str)));
+      const obj = JSON.parse(decoded);
+      // If paletteColors exists, use it as palette
+      if (obj.paletteColors && Array.isArray(obj.paletteColors)) {
+        obj.palette = obj.paletteColors;
+      }
+      return obj;
+    } catch (e) {
+      return null;
+    }
+  };
+
+  const updateURLWithConfig = (config: any) => {
+    const encoded = encodeConfigToString(config);
+    const newURL = `?c=${encoded}`;
+    const fullURL = `${window.location.origin}${window.location.pathname}${newURL}`;
+    window.history.replaceState({}, '', fullURL);
+  };
+
+  const loadConfigFromURL = () => {
+    const params = new URLSearchParams(window.location.search);
+    const encoded = params.get('c');
+    if (encoded) {
+      const loadedConfig = decodeConfigFromString(encoded);
+      if (loadedConfig) {
+        setLoadedFromURL(true);
+        setPreserveCurrentConfig(true);
+        setSeed(loadedConfig.seed);
+        setPalette(loadedConfig.palette);
+        setPaletteColors(loadedConfig.paletteColors || null);
+        setThreadSpacing(loadedConfig.threadSpacing);
+        setBgColor(loadedConfig.bgColor);
+        setLint(loadedConfig.lint);
+        setWeaveStyle(loadedConfig.weaveStyle);
+        setOpaque(loadedConfig.opaque);
+        setBitcoinMode(loadedConfig.bitcoinMode || false);
+        setBitcoinSeedMode(loadedConfig.bitcoinSeedMode || 'none');
+        setBitcoinHash(loadedConfig.bitcoinHash || '');
+        setBitcoinAddress(loadedConfig.bitcoinAddress || '');
+        setBitcoinDataMode(loadedConfig.bitcoinDataMode || false);
+        setBitcoinDataParams(loadedConfig.bitcoinDataParams || ['blockHeight']);
+        setPriceBasedArt(loadedConfig.priceBasedArt || false);
+        setDynamicFadeMode(loadedConfig.dynamicFadeMode || false);
+        const fullConfig = {
+          ...loadedConfig,
+          threadVariance: loadedConfig.threadVariance || (loadedConfig.weaveStyle === 'classic' ? 0.3 : 0)
+        };
+        // Use setTimeout to ensure all state updates are processed first
+        setTimeout(() => {
+          generateNewArt(fullConfig);
+        }, 0);
+        return true;
+      }
+    }
+    return false;
+  };
+
+  const mapBitcoinDataToArtParams = (bitcoinData: any, currentConfig: any) => {
+    if (!bitcoinData || !bitcoinDataMode) return currentConfig;
+    
+    const config = { ...currentConfig };
+    
+    // Map different Bitcoin data points to art parameters
+    bitcoinDataParams.forEach(param => {
+      switch (param) {
+        case 'blockHeight':
+          if (bitcoinData.blockHeight) {
+            // Use block height to influence thread spacing (modulo to keep in range)
+            const blockMod = bitcoinData.blockHeight % 100;
+            config.threadSpacing = 1 + ((blockMod / 100) * 4); // 1-5 range
+          }
+          break;
+          
+        case 'difficulty':
+          // Note: We'd need to fetch difficulty separately, for now use a placeholder
+          // This could influence weave style or pattern complexity
+          break;
+          
+        case 'mempoolSize':
+          // Could influence the 'lint' parameter or color intensity
+          // For now, we'll use a placeholder since mempool size isn't in our current API call
+          break;
+          
+        case 'fees':
+          if (bitcoinData.fees && bitcoinData.fees.fastestFee) {
+            // Use fee levels to influence background color or pattern density
+            const feeLevel = Math.min(bitcoinData.fees.fastestFee / 100, 1); // Normalize to 0-1
+            // Adjust background darkness based on fee level
+            const grayLevel = Math.floor(34 + (feeLevel * 100)); // 34-134 range
+            config.bgColor = `#${grayLevel.toString(16).padStart(2, '0').repeat(3)}`;
+          }
+          break;
+      }
+    });
+    
+    return config;
+  };
+
   // Function to get current config with random values applied
   const getCurrentConfig = () => {
     let currentSeed = seed;
     let currentPalette = palette;
+    let currentPaletteColors = paletteColors;
     let currentThreadSpacing = threadSpacing;
     let currentBgColor = bgColor;
     let currentLint = lint;
     let currentWeaveStyle = weaveStyle;
 
-    if (randomAll || randomSeed) {
-      currentSeed = generateRandomSeed();
-      setSeed(currentSeed); // Update state with new seed
-    }
-    if (randomAll || randomPaletteToggle) {
-      currentPalette = randomPalette();
-      setPalette(currentPalette); // Update state with new palette
-    }
-    if (randomAll || randomThreadSpacing) {
-      currentThreadSpacing = generateRandomThreadSpacing();
-      setThreadSpacing(currentThreadSpacing); // Update state with new thread spacing
-    }
-    if (randomAll || randomBgColor) {
-      currentBgColor = generateRandomBgColor();
-      setBgColor(currentBgColor); // Update state with new background color
-    }
-    if (randomAll || randomLint) {
-      currentLint = generateRandomLint();
-      setLint(currentLint); // Update state with new lint setting
-    }
-    if (randomAll || randomWeaveStyle) {
-      currentWeaveStyle = generateRandomWeaveStyle();
-      setWeaveStyle(currentWeaveStyle); // Update state with new weave style
+    if (!preserveCurrentConfig) {
+      // Handle Bitcoin seed modes
+      if (bitcoinMode && bitcoinSeedMode === 'hash' && bitcoinHash) {
+        currentSeed = hashToPRNGSeed(bitcoinHash);
+        setSeed(currentSeed);
+      } else if (bitcoinMode && bitcoinSeedMode === 'address' && bitcoinAddress) {
+        currentSeed = addressToPRNGSeed(bitcoinAddress);
+        setSeed(currentSeed);
+      } else if (randomAll || randomSeed) {
+        currentSeed = generateRandomSeed();
+        setSeed(currentSeed); // Update state with new seed
+      }
+      if (randomAll || randomPaletteToggle) {
+        currentPalette = 'Random Madras';
+        currentPaletteColors = randomPalette();
+        setPaletteColors(currentPaletteColors);
+      }
+      if (randomAll || randomThreadSpacing) {
+        currentThreadSpacing = generateRandomThreadSpacing();
+        setThreadSpacing(currentThreadSpacing); // Update state with new thread spacing
+      }
+      if (randomAll || randomBgColor) {
+        currentBgColor = generateRandomBgColor();
+        setBgColor(currentBgColor); // Update state with new background color
+      }
+      if (randomAll || randomLint) {
+        currentLint = generateRandomLint();
+        setLint(currentLint); // Update state with new lint setting
+      }
+      if (randomAll || randomWeaveStyle) {
+        currentWeaveStyle = generateRandomWeaveStyle();
+        setWeaveStyle(currentWeaveStyle); // Update state with new weave style
+      }
     }
 
-    return {
+    const baseConfig = {
       seed: currentSeed,
       palette: currentPalette,
+      paletteColors: currentPalette === 'Random Madras' ? currentPaletteColors : null,
       threadSpacing: currentThreadSpacing,
       bgColor: currentBgColor,
       lint: currentLint,
       weaveStyle: currentWeaveStyle,
       opaque,
-      threadVariance: currentWeaveStyle === 'classic' ? 0.3 : 0
+      threadVariance: currentWeaveStyle === 'classic' ? 0.3 : 0,
+      bitcoinMode,
+      bitcoinSeedMode,
+      bitcoinHash,
+      bitcoinAddress,
+      bitcoinDataMode,
+      bitcoinDataParams,
+      priceBasedArt,
+      dynamicFadeMode
     };
+
+    // Apply Bitcoin data modifications if enabled
+    return mapBitcoinDataToArtParams(bitcoinData, baseConfig);
   };
 
   // Function to get config for bulk generation (respects current settings with some randomization)
   const getBulkConfig = () => {
-    // Use current settings as base, but randomize seed for variety
+    // Use current settings as base, but randomize seed for variety unless Bitcoin mode is active
     let currentSeed = generateRandomSeed();
     let currentPalette = palette;
     let currentThreadSpacing = threadSpacing;
     let currentBgColor = bgColor;
     let currentLint = lint;
     let currentWeaveStyle = weaveStyle;
+
+    // Handle Bitcoin seed modes for bulk generation
+    if (bitcoinMode && bitcoinSeedMode === 'hash' && bitcoinHash) {
+      currentSeed = hashToPRNGSeed(bitcoinHash);
+    } else if (bitcoinMode && bitcoinSeedMode === 'address' && bitcoinAddress) {
+      currentSeed = addressToPRNGSeed(bitcoinAddress);
+    }
 
     // Helper: get all curated palette names except 'Random Madras'
     const curatedPaletteNames = Object.keys(PALETTE_COLORS);
@@ -584,7 +960,7 @@ export default function App() {
       currentWeaveStyle = generateRandomWeaveStyle();
     }
 
-    return {
+    const baseConfig = {
       seed: currentSeed,
       palette: currentPalette,
       threadSpacing: currentThreadSpacing,
@@ -594,16 +970,21 @@ export default function App() {
       opaque,
       threadVariance: currentWeaveStyle === 'classic' ? 0.3 : 0
     };
+
+    // Apply Bitcoin data modifications if enabled
+    return mapBitcoinDataToArtParams(bitcoinData, baseConfig);
   };
 
   // Only regenerate random palette on Generate Art
   const regenerate = () => {
+    setPreserveCurrentConfig(false);
     const newSeed = Array.from({length: 16}, () => Math.floor(Math.random()*16).toString(16)).join('');
     setSeed(newSeed);
     if (palette === 'Random Madras') {
-      setRandomPaletteColors(randomPalette());
+      setPaletteColors(randomPalette());
     }
-    generateNewArt();
+    // Do NOT call generateNewArt here!
+    setPendingGeneration(true);
   };
 
   const saveToGallery = () => {
@@ -625,10 +1006,17 @@ export default function App() {
     return color ? color.label : 'Unknown';
   };
 
+  // Move Escape key handler to top-level useEffect
+  useEffect(() => {
+    const handler = (e: KeyboardEvent) => { if (e.key === 'Escape') setModalArt(null); };
+    if (modalArt) window.addEventListener('keydown', handler);
+    return () => window.removeEventListener('keydown', handler);
+  }, [modalArt]);
+
   return (
     <div className="EOL-dark-root">
-      {/* Backend Toggle UI */}
-      <div style={{margin: '16px 0', textAlign: 'center'}}>
+      {/* Backend Toggle UI - Hidden for showcase */}
+      {/* <div style={{margin: '16px 0', textAlign: 'center'}}>
         <label style={{fontWeight: 500, fontSize: 15, color: '#fff', background: '#222', padding: '8px 16px', borderRadius: 8}}>
           <input
             type="checkbox"
@@ -644,6 +1032,42 @@ export default function App() {
           />
           Use Render Backend ({backendUrl})
         </label>
+      </div> */}
+
+      {/* Permalink UI */}
+      <div style={{margin: '16px 0', textAlign: 'center'}}>
+        <div style={{
+          display: 'inline-flex',
+          alignItems: 'center',
+          gap: 12,
+          background: '#1a1a1a',
+          padding: '12px 16px',
+          borderRadius: 8,
+          border: '1px solid #333'
+        }}>
+          <span style={{fontSize: 14, color: '#ccc', fontWeight: 500}}>🔗 Short Permalink</span>
+          <button
+            onClick={() => {
+              navigator.clipboard.writeText(window.location.href);
+              alert('Permalink copied to clipboard!');
+            }}
+            style={{
+              padding: '6px 12px',
+              background: '#ff5c2a',
+              color: '#fff',
+              border: 'none',
+              borderRadius: 4,
+              cursor: 'pointer',
+              fontSize: 12,
+              fontWeight: 500
+            }}
+          >
+            Copy Link
+          </button>
+          <div style={{fontSize: 11, color: '#888', maxWidth: 300, textAlign: 'left'}}>
+            Compact seed encodes all settings. Share this short link to recreate the exact artwork.
+          </div>
+        </div>
       </div>
       {/* Top Bar */}
       <header className="EOL-dark-topbar">
@@ -672,6 +1096,36 @@ export default function App() {
           >
             {isGenerating ? 'Generating...' : 'Generate Art'}
           </button>
+          
+          {/* Reload from URL button - Hidden for showcase */}
+          {/* <button 
+            onClick={() => {
+              const configLoaded = loadConfigFromURL();
+              if (configLoaded) {
+                // Generate art with loaded config after a small delay
+                setTimeout(() => {
+                  generateNewArt();
+                }, 100);
+              } else {
+                alert('No configuration found in URL');
+              }
+            }}
+            disabled={isGenerating}
+            style={{
+              width: '100%',
+              padding: '8px 16px',
+              background: isGenerating ? '#333' : '#2563eb',
+              color: '#fff',
+              border: 'none',
+              borderRadius: 6,
+              cursor: isGenerating ? 'not-allowed' : 'pointer',
+              fontSize: '0.9rem',
+              marginTop: 8,
+              fontWeight: 500
+            }}
+          >
+            🔗 Load from URL
+          </button> */}
           
           {/* Bulk Generation Buttons */}
           <div style={{display: 'flex', gap: 8, marginTop: 12}}>
@@ -729,6 +1183,284 @@ export default function App() {
               </button>
             </div>
           )}
+          
+          {/* Bitcoin Integration Controls */}
+          <div className="EOL-dark-card">
+            <div style={{display:'flex',flexDirection:'row',alignItems:'center',justifyContent:'space-between',width:'100%',marginBottom:12}}>
+              <span style={{fontSize: '1.15rem', fontWeight: 500}}>₿ Bitcoin Integration</span>
+              <div 
+                onClick={() => setBitcoinMode(!bitcoinMode)}
+                style={{
+                  width: 44,
+                  height: 24,
+                  background: bitcoinMode ? '#ff5c2a' : '#333',
+                  borderRadius: 12,
+                  position: 'relative',
+                  cursor: 'pointer',
+                  transition: 'background 0.2s ease',
+                  border: '1px solid #555',
+                  marginLeft: 16
+                }}
+              >
+                <div style={{
+                  width: 18,
+                  height: 18,
+                  background: '#fff',
+                  borderRadius: '50%',
+                  position: 'absolute',
+                  top: 2,
+                  left: bitcoinMode ? 22 : 2,
+                  transition: 'left 0.2s ease',
+                  boxShadow: '0 1px 3px rgba(0,0,0,0.3)'
+                }} />
+              </div>
+            </div>
+            
+            {bitcoinMode && (
+              <div style={{display:'flex',flexDirection:'column',gap:12}}>
+                {/* Seed Mode Selection */}
+                <div>
+                  <label style={{fontSize:'0.9rem',color:'#ccc',marginBottom:8,display:'block'}}>Seed Source</label>
+                  <div style={{display:'flex',gap:8,flexWrap:'wrap'}}>
+                    <button 
+                      onClick={() => setBitcoinSeedMode('none')}
+                      style={{
+                        padding: '4px 12px',
+                        background: bitcoinSeedMode === 'none' ? '#ff5c2a' : '#333',
+                        color: '#fff',
+                        border: 'none',
+                        borderRadius: 4,
+                        cursor: 'pointer',
+                        fontSize: '0.8rem'
+                      }}
+                    >
+                      Random
+                    </button>
+                    <button 
+                      onClick={() => setBitcoinSeedMode('hash')}
+                      style={{
+                        padding: '4px 12px',
+                        background: bitcoinSeedMode === 'hash' ? '#ff5c2a' : '#333',
+                        color: '#fff',
+                        border: 'none',
+                        borderRadius: 4,
+                        cursor: 'pointer',
+                        fontSize: '0.8rem'
+                      }}
+                    >
+                      Block/Tx Hash
+                    </button>
+                    <button 
+                      onClick={() => setBitcoinSeedMode('address')}
+                      style={{
+                        padding: '4px 12px',
+                        background: bitcoinSeedMode === 'address' ? '#ff5c2a' : '#333',
+                        color: '#fff',
+                        border: 'none',
+                        borderRadius: 4,
+                        cursor: 'pointer',
+                        fontSize: '0.8rem'
+                      }}
+                    >
+                      Address
+                    </button>
+                  </div>
+                </div>
+
+                {/* Hash Input */}
+                {bitcoinSeedMode === 'hash' && (
+                  <div>
+                    <label style={{fontSize:'0.9rem',color:'#ccc',marginBottom:4,display:'block'}}>Block/Transaction Hash</label>
+                    <input
+                      type="text"
+                      value={bitcoinHash}
+                      onChange={(e) => setBitcoinHash(e.target.value)}
+                      placeholder="Enter block or transaction hash..."
+                      style={{
+                        width: '100%',
+                        padding: '8px 12px',
+                        background: '#333',
+                        border: '1px solid #555',
+                        borderRadius: 6,
+                        color: '#fff',
+                        fontSize: '0.9rem',
+                        boxSizing: 'border-box'
+                      }}
+                    />
+                  </div>
+                )}
+
+                {/* Address Input */}
+                {bitcoinSeedMode === 'address' && (
+                  <div>
+                    <label style={{fontSize:'0.9rem',color:'#ccc',marginBottom:4,display:'block'}}>Bitcoin Address</label>
+                    <input
+                      type="text"
+                      value={bitcoinAddress}
+                      onChange={(e) => setBitcoinAddress(e.target.value)}
+                      placeholder="Enter Bitcoin address..."
+                      style={{
+                        width: '100%',
+                        padding: '8px 12px',
+                        background: '#333',
+                        border: '1px solid #555',
+                        borderRadius: 6,
+                        color: '#fff',
+                        fontSize: '0.9rem',
+                        boxSizing: 'border-box'
+                      }}
+                    />
+                  </div>
+                )}
+
+                {/* Bitcoin Data Mode */}
+                <div>
+                  <div style={{display:'flex',alignItems:'center',justifyContent:'space-between',marginBottom:8}}>
+                    <label style={{fontSize:'0.9rem',color:'#ccc'}}>Bitcoin Data Driven</label>
+                    <div 
+                      onClick={() => setBitcoinDataMode(!bitcoinDataMode)}
+                      style={{
+                        width: 36,
+                        height: 20,
+                        background: bitcoinDataMode ? '#ff5c2a' : '#333',
+                        borderRadius: 10,
+                        position: 'relative',
+                        cursor: 'pointer',
+                        transition: 'background 0.2s ease',
+                        border: '1px solid #555'
+                      }}
+                    >
+                      <div style={{
+                        width: 14,
+                        height: 14,
+                        background: '#fff',
+                        borderRadius: '50%',
+                        position: 'absolute',
+                        top: 2,
+                        left: bitcoinDataMode ? 18 : 2,
+                        transition: 'left 0.2s ease',
+                        boxShadow: '0 1px 3px rgba(0,0,0,0.3)'
+                      }} />
+                    </div>
+                  </div>
+                  {bitcoinDataMode && (
+                    <div style={{display:'flex',gap:6,flexWrap:'wrap'}}>
+                      {['blockHeight', 'difficulty', 'mempoolSize', 'fees'].map(param => (
+                        <button
+                          key={param}
+                          onClick={() => {
+                            if (bitcoinDataParams.includes(param)) {
+                              setBitcoinDataParams(bitcoinDataParams.filter(p => p !== param));
+                            } else {
+                              setBitcoinDataParams([...bitcoinDataParams, param]);
+                            }
+                          }}
+                          style={{
+                            padding: '3px 8px',
+                            background: bitcoinDataParams.includes(param) ? '#ff5c2a' : '#444',
+                            color: '#fff',
+                            border: '1px solid #666',
+                            borderRadius: 3,
+                            cursor: 'pointer',
+                            fontSize: '0.75rem'
+                          }}
+                        >
+                          {param}
+                        </button>
+                      ))}
+                    </div>
+                  )}
+                </div>
+
+                {/* Price-Based Art */}
+                <div style={{display:'flex',alignItems:'center',justifyContent:'space-between'}}>
+                  <label style={{fontSize:'0.9rem',color:'#ccc'}}>Price-Based Art</label>
+                  <div 
+                    onClick={() => setPriceBasedArt(!priceBasedArt)}
+                    style={{
+                      width: 36,
+                      height: 20,
+                      background: priceBasedArt ? '#ff5c2a' : '#333',
+                      borderRadius: 10,
+                      position: 'relative',
+                      cursor: 'pointer',
+                      transition: 'background 0.2s ease',
+                      border: '1px solid #555'
+                    }}
+                  >
+                    <div style={{
+                      width: 14,
+                      height: 14,
+                      background: '#fff',
+                      borderRadius: '50%',
+                      position: 'absolute',
+                      top: 2,
+                      left: priceBasedArt ? 18 : 2,
+                      transition: 'left 0.2s ease',
+                      boxShadow: '0 1px 3px rgba(0,0,0,0.3)'
+                    }} />
+                  </div>
+                </div>
+
+                {/* Dynamic Fade */}
+                <div style={{display:'flex',alignItems:'center',justifyContent:'space-between'}}>
+                  <label style={{fontSize:'0.9rem',color:'#ccc'}}>Dynamic Fade (Price)</label>
+                  <div 
+                    onClick={() => setDynamicFadeMode(!dynamicFadeMode)}
+                    style={{
+                      width: 36,
+                      height: 20,
+                      background: dynamicFadeMode ? '#ff5c2a' : '#333',
+                      borderRadius: 10,
+                      position: 'relative',
+                      cursor: 'pointer',
+                      transition: 'background 0.2s ease',
+                      border: '1px solid #555'
+                    }}
+                  >
+                    <div style={{
+                      width: 14,
+                      height: 14,
+                      background: '#fff',
+                      borderRadius: '50%',
+                      position: 'absolute',
+                      top: 2,
+                      left: dynamicFadeMode ? 18 : 2,
+                      transition: 'left 0.2s ease',
+                      boxShadow: '0 1px 3px rgba(0,0,0,0.3)'
+                    }} />
+                  </div>
+                </div>
+                
+                {/* Fade Level Indicator */}
+                {dynamicFadeMode && (
+                  <div style={{marginTop:8}}>
+                    <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:4}}>
+                      <span style={{fontSize:'0.8rem',color:'#999'}}>Current Fade</span>
+                      <span style={{fontSize:'0.8rem',color: fadeLevel > 0.7 ? '#4ade80' : fadeLevel > 0.5 ? '#fbbf24' : '#ef4444'}}>
+                        {Math.round(fadeLevel * 100)}%
+                      </span>
+                    </div>
+                    <div style={{
+                      width:'100%',
+                      height:4,
+                      background:'#333',
+                      borderRadius:2,
+                      overflow:'hidden'
+                    }}>
+                      <div style={{
+                        width:`${fadeLevel * 100}%`,
+                        height:'100%',
+                        background: fadeLevel > 0.7 ? '#4ade80' : fadeLevel > 0.5 ? '#fbbf24' : '#ef4444',
+                        borderRadius:2,
+                        transition:'all 0.3s ease'
+                      }} />
+                    </div>
+                  </div>
+                )}
+              </div>
+            )}
+          </div>
           
           {/* Queue Navigation */}
           {artQueue.length > 1 && (
@@ -917,7 +1649,7 @@ export default function App() {
 
           <div className="EOL-dark-card">
             <label>Palette
-              <PaletteDropdown palette={palette} setPalette={setPalette} groups={PALETTE_GROUPS} getColors={name => name==='Random Madras'?randomPalette():PALETTE_COLORS[name]} />
+              <PaletteDropdown palette={palette} setPalette={setPalette} groups={PALETTE_GROUPS} getColors={name => name==='Random Madras'?randomPalette():PALETTE_COLORS[name]} paletteColors={paletteColors} />
             </label>
           </div>
 
@@ -945,6 +1677,7 @@ export default function App() {
               <BackgroundColorPicker bgColor={bgColor} setBgColor={setBgColor} opaque={opaque} setOpaque={setOpaque} />
             </label>
           </div>
+
           <div className="EOL-dark-card">
             <div style={{display:'flex',flexDirection:'row',alignItems:'center',justifyContent:'space-between',width:'100%'}}>
               <span style={{fontSize: '1.15rem', fontWeight: 500}}>Fresh from Loom</span>
@@ -1018,7 +1751,10 @@ export default function App() {
                   boxShadow: isFullscreen ? 'none' : undefined,
                   display: 'block',
                   margin: 0,
-                  padding: 0
+                  padding: 0,
+                  // Apply dynamic fade when Bitcoin mode is enabled
+                  filter: bitcoinMode && dynamicFadeMode ? `brightness(${fadeLevel}) contrast(${0.8 + (fadeLevel * 0.2)})` : undefined,
+                  transition: 'filter 0.3s ease'
                 }}
               />
             ) : (
@@ -1105,7 +1841,7 @@ export default function App() {
             {artQueue.map((art, index) => (
               <div
                 key={index}
-                onClick={() => setCurrentArtIndex(index)}
+                onClick={() => setModalArt(art)}
                 style={{
                   width: '275px',
                   height: '275px',
@@ -1194,7 +1930,32 @@ export default function App() {
                     setLint(item.lint);
                     setBgColor(item.bgColor);
                     setOpaque(item.opaque);
+                    if (item.palette === 'Random Madras' && item.paletteColors) {
+                      setPaletteColors(item.paletteColors);
+                    } else {
+                      setPaletteColors(null);
+                    }
                     setGalleryOpen(false);
+                    // Update the URL to reflect the loaded config
+                    updateURLWithConfig({
+                      seed: item.seed,
+                      palette: item.palette,
+                      paletteColors: item.palette === 'Random Madras' && item.paletteColors ? item.paletteColors : null,
+                      threadSpacing: item.threadSpacing,
+                      bgColor: item.bgColor,
+                      lint: item.lint,
+                      weaveStyle: item.weaveStyle || 'classic',
+                      opaque: item.opaque,
+                      threadVariance: item.weaveStyle === 'classic' ? 0.3 : 0,
+                      bitcoinMode,
+                      bitcoinSeedMode,
+                      bitcoinHash,
+                      bitcoinAddress,
+                      bitcoinDataMode,
+                      bitcoinDataParams,
+                      priceBasedArt,
+                      dynamicFadeMode
+                    });
                   }}>Load</button>
                 </div>
               ))
@@ -1203,6 +1964,201 @@ export default function App() {
         </div>
       )}
       <button className="EOL-dark-gallery-open" onClick={() => setGalleryOpen(true)} style={{position:'fixed',bottom:24,right:24}}>Gallery</button>
+
+      {modalArt && (
+        <div style={{
+          position: 'fixed',
+          top: 0,
+          left: 0,
+          width: '100vw',
+          height: '100vh',
+          background: 'rgba(0,0,0,0.85)',
+          zIndex: 1000,
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          overflow: 'auto',
+          padding: '40px'
+        }}
+          onClick={e => { if (e.target === e.currentTarget) setModalArt(null); }}
+        >
+          <div style={{
+            background: '#18191c',
+            borderRadius: 16,
+            boxShadow: '0 8px 40px #000a',
+            display: 'flex',
+            flexDirection: 'row',
+            maxWidth: 1600,
+            width: '95vw',
+            maxHeight: '95vh',
+            overflow: 'hidden',
+            position: 'relative',
+          }}>
+            {/* Artwork */}
+            <div style={{
+              flex: '1 1 0',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              minWidth: 0,
+              minHeight: 0,
+              background: '#111',
+              padding: 0,
+              position: 'relative',
+              overflow: 'hidden'
+            }}>
+              <div style={{
+                width: 'min(80vw, 80vh)',
+                height: 'min(80vw, 80vh)',
+                aspectRatio: '1/1',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                background: '#18191c',
+                borderRadius: 16,
+                boxShadow: '0 4px 24px #0008',
+                overflow: 'hidden',
+              }}>
+                <iframe
+                  srcDoc={modalArt.html}
+                  style={{
+                    width: '100%',
+                    height: '100%',
+                    border: 'none',
+                    borderRadius: 12,
+                    background: 'transparent',
+                    boxShadow: 'none',
+                    display: 'block',
+                  }}
+                  title="Gallery Artwork Preview"
+                />
+              </div>
+            </div>
+            {/* Traits Sidebar */}
+            <div style={{
+              flex: 1,
+              background: '#222',
+              color: '#fff',
+              padding: 40,
+              display: 'flex',
+              flexDirection: 'column',
+              minWidth: 380,
+              maxWidth: 420,
+              overflowY: 'auto',
+              borderLeft: '1px solid #333',
+            }}>
+              <h2 style={{fontSize: 22, fontWeight: 700, marginBottom: 16}}>Traits</h2>
+              <div style={{marginBottom: 12}}><b>Seed:</b> <span style={{fontFamily: 'monospace'}}>{modalArt.config.seed}</span></div>
+              <div style={{marginBottom: 12}}><b>Palette:</b> {typeof modalArt.config.palette === 'string' ? modalArt.config.palette : 'Custom'}
+                <div style={{marginTop: 4}}>
+                  <PaletteSwatch colors={Array.isArray(modalArt.config.palette) ? modalArt.config.palette : (PALETTE_COLORS[modalArt.config.palette] || [])} />
+                </div>
+              </div>
+              <div style={{marginBottom: 12}}><b>Thread Spacing:</b> {modalArt.config.threadSpacing}</div>
+              <div style={{marginBottom: 12}}><b>Background:</b> <span style={{background: modalArt.config.bgColor, color: '#000', padding: '2px 8px', borderRadius: 4}}>{modalArt.config.bgColor}</span></div>
+              <div style={{marginBottom: 12}}><b>Weave Style:</b> {modalArt.config.weaveStyle}</div>
+              <div style={{marginBottom: 12}}><b>Lint:</b> {modalArt.config.lint ? 'Yes' : 'No'}</div>
+              <div style={{marginBottom: 12}}><b>Opaque:</b> {modalArt.config.opaque ? 'Yes' : 'No'}</div>
+              {/* Bitcoin traits */}
+              {modalArt.config.bitcoinMode && (
+                <>
+                  <div style={{margin: '16px 0 8px', fontWeight: 600, color: '#ff5c2a'}}>Bitcoin Integration</div>
+                  <div style={{marginBottom: 8}}><b>Seed Mode:</b> {modalArt.config.bitcoinSeedMode}</div>
+                  {modalArt.config.bitcoinSeedMode === 'hash' && <div style={{marginBottom: 8}}><b>Hash:</b> {modalArt.config.bitcoinHash}</div>}
+                  {modalArt.config.bitcoinSeedMode === 'address' && <div style={{marginBottom: 8}}><b>Address:</b> {modalArt.config.bitcoinAddress}</div>}
+                  <div style={{marginBottom: 8}}><b>Data Mode:</b> {modalArt.config.bitcoinDataMode ? 'On' : 'Off'}</div>
+                  {modalArt.config.bitcoinDataMode && <div style={{marginBottom: 8}}><b>Data Params:</b> {modalArt.config.bitcoinDataParams?.join(', ')}</div>}
+                  <div style={{marginBottom: 8}}><b>Price Based Art:</b> {modalArt.config.priceBasedArt ? 'Yes' : 'No'}</div>
+                  <div style={{marginBottom: 8}}><b>Dynamic Fade:</b> {modalArt.config.dynamicFadeMode ? 'Yes' : 'No'}</div>
+                </>
+              )}
+              {/* Buttons */}
+              <div style={{marginTop: 24, display: 'flex', flexDirection: 'column', gap: 12}}>
+                <button
+                  onClick={() => {
+                    const config = modalArt.config;
+                    const minimalConfig = {
+                      seed: config.seed,
+                      palette: config.palette,
+                      paletteColors: config.paletteColors || null,
+                      threadSpacing: config.threadSpacing,
+                      bgColor: config.bgColor,
+                      lint: config.lint,
+                      weaveStyle: config.weaveStyle,
+                      opaque: config.opaque,
+                      threadVariance: config.threadVariance || (config.weaveStyle === 'classic' ? 0.3 : 0),
+                      bitcoinMode: config.bitcoinMode || false,
+                      bitcoinSeedMode: config.bitcoinSeedMode || 'none',
+                      bitcoinHash: config.bitcoinHash || '',
+                      bitcoinAddress: config.bitcoinAddress || '',
+                      bitcoinDataMode: config.bitcoinDataMode || false,
+                      bitcoinDataParams: config.bitcoinDataParams || ['blockHeight'],
+                      priceBasedArt: config.priceBasedArt || false,
+                      dynamicFadeMode: config.dynamicFadeMode || false
+                    };
+                    const encoded = btoa(unescape(encodeURIComponent(JSON.stringify(minimalConfig))));
+                    const url = `${window.location.origin}${window.location.pathname}?c=${encoded}`;
+                    navigator.clipboard.writeText(url);
+                    alert('Permalink copied!');
+                  }}
+                  style={{padding: '8px 16px', background: '#ff5c2a', color: '#fff', border: 'none', borderRadius: 6, fontWeight: 600, cursor: 'pointer'}}
+                >Copy Permalink</button>
+                <button
+                  onClick={() => alert('Download coming soon!')}
+                  style={{padding: '8px 16px', background: '#333', color: '#fff', border: 'none', borderRadius: 6, fontWeight: 600, cursor: 'pointer'}}
+                >Download</button>
+                <button
+                  onClick={() => alert('Mint coming soon!')}
+                  style={{padding: '8px 16px', background: '#333', color: '#fff', border: 'none', borderRadius: 6, fontWeight: 600, cursor: 'pointer'}}
+                >Mint</button>
+                <button
+                  onClick={() => {
+                    // Load config into generator and close modal
+                    setSeed(modalArt.config.seed);
+                    setPalette(modalArt.config.palette);
+                    setPaletteColors(modalArt.config.paletteColors || null);
+                    setThreadSpacing(modalArt.config.threadSpacing);
+                    setBgColor(modalArt.config.bgColor);
+                    setLint(modalArt.config.lint);
+                    setWeaveStyle(modalArt.config.weaveStyle);
+                    setOpaque(modalArt.config.opaque);
+                    setBitcoinMode(modalArt.config.bitcoinMode || false);
+                    setBitcoinSeedMode(modalArt.config.bitcoinSeedMode || 'none');
+                    setBitcoinHash(modalArt.config.bitcoinHash || '');
+                    setBitcoinAddress(modalArt.config.bitcoinAddress || '');
+                    setBitcoinDataMode(modalArt.config.bitcoinDataMode || false);
+                    setBitcoinDataParams(modalArt.config.bitcoinDataParams || ['blockHeight']);
+                    setPriceBasedArt(modalArt.config.priceBasedArt || false);
+                    setDynamicFadeMode(modalArt.config.dynamicFadeMode || false);
+                    setModalArt(null);
+                    setPendingGeneration(true);
+                  }}
+                  style={{padding: '8px 16px', background: '#2563eb', color: '#fff', border: 'none', borderRadius: 6, fontWeight: 600, cursor: 'pointer'}}
+                >Create with these traits</button>
+              </div>
+            </div>
+            {/* Close button */}
+            <button
+              onClick={() => setModalArt(null)}
+              style={{
+                position: 'absolute',
+                top: 16,
+                right: 16,
+                background: 'rgba(0,0,0,0.7)',
+                color: '#fff',
+                border: 'none',
+                borderRadius: '50%',
+                width: 40,
+                height: 40,
+                fontSize: 22,
+                cursor: 'pointer',
+                zIndex: 10
+              }}
+              title="Close"
+            >×</button>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
