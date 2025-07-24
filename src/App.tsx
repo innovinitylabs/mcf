@@ -1,7 +1,26 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useMemo } from 'react';
 import './App.css';
 // @ts-ignore
 import logo from './valipokkann.svg';
+import { 
+  Heart, 
+  Trash2, 
+  Tag, 
+  X, 
+  ChevronLeft, 
+  ChevronRight, 
+  Maximize2, 
+  Minimize2, 
+  BookOpen, 
+  Settings,
+  Copy,
+  Key,
+  Dice6,
+  Palette,
+  Sparkles,
+  Save,
+  Shuffle
+} from 'lucide-react';
 
 // TypeScript: declare window._env_ for custom env injection
 declare global {
@@ -60,7 +79,7 @@ const PALETTE_GROUPS = [
 
 // Skin color palette for background options
 const SKIN_COLORS = [
-  { name: 'Black', value: '#222', label: 'Black' },
+  { name: 'Black', value: '#000000', label: 'Black' },
   { name: 'White', value: '#fff', label: 'White' },
   { name: 'Very Light', value: '#f9e4d2', label: 'Very Light' },
   { name: 'Light', value: '#f5cfa0', label: 'Light' },
@@ -229,7 +248,14 @@ function PaletteDropdown({palette, setPalette, groups, getColors, paletteColors}
 // Background color button picker
 function BackgroundColorPicker({bgColor, setBgColor, opaque, setOpaque}) {
   return (
-    <div style={{display:'flex',flexWrap:'wrap',gap:8,marginBottom:8}}>
+    <div style={{
+      display: 'grid',
+      gridTemplateColumns: 'repeat(5, 1fr)',
+      gap: 8,
+      marginBottom: 8,
+      maxWidth: '200px',
+      margin: '0 auto 8px auto'
+    }}>
       {SKIN_COLORS.map(color => (
         <button
           key={color.value}
@@ -242,8 +268,8 @@ function BackgroundColorPicker({bgColor, setBgColor, opaque, setOpaque}) {
             }
           }}
           style={{
-            width: 32,
-            height: 32,
+            width: '100%',
+            aspectRatio: '1',
             background: color.value === 'transparent' 
               ? 'repeating-conic-gradient(from 0deg, #333 0deg 10deg, #666 10deg 20deg)' 
               : color.value,
@@ -271,8 +297,20 @@ export default function App() {
   const [paletteColors, setPaletteColors] = useState<string[] | null>(null); // NEW: store actual colors if Random Madras
   const [lint, setLint] = useState(true);
   const [threadSpacing, setThreadSpacing] = useState(5);
-  const [galleryOpen, setGalleryOpen] = useState(false);
-  const [gallery, setGallery] = useState<any[]>([]);
+
+  const [gallery, setGallery] = useState<any[]>(() => {
+    try {
+      const saved = localStorage.getItem('gallery');
+      return saved ? JSON.parse(saved) : [];
+    } catch (e) {
+      return [];
+    }
+  });
+  
+  // Gallery selection and management state
+  const [selectedGalleryItems, setSelectedGalleryItems] = useState<Set<string>>(new Set());
+  const [galleryView, setGalleryView] = useState<'queue' | 'favorites' | 'listed'>('queue');
+  const [listedItems, setListedItems] = useState<Set<string>>(new Set());
   const [bgColor, setBgColor] = useState('#fff');
   const [opaque, setOpaque] = useState(true);
   const [weaveStyle, setWeaveStyle] = useState<'classic' | 'woven'>('classic');
@@ -328,6 +366,7 @@ export default function App() {
   const [pendingGeneration, setPendingGeneration] = useState(false);
 
   const [modalArt, setModalArt] = useState<{ id: string; html: string; config: any; timestamp: number } | null>(null);
+  const [modalIndex, setModalIndex] = useState<number>(0); // Add state for modal navigation
   const [hasGeneratedFirstArt, setHasGeneratedFirstArt] = useState(false);
   const [generationCounter, setGenerationCounter] = useState(0);
   const generationInProgress = useRef(false);
@@ -348,8 +387,8 @@ export default function App() {
     if (!hasGeneratedFirstArt && artQueue.length === 0 && !isGenerating) {
       const configLoaded = loadConfigFromURL();
       if (!configLoaded) {
-        generateNewArt();
-      }
+      generateNewArt();
+    }
       setHasGeneratedFirstArt(true);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -451,7 +490,7 @@ export default function App() {
     if (pendingGeneration && !generationInProgress.current) {
       console.log('Pending generation triggered');
       // Use the latest config
-      const config = getCurrentConfig();
+    const config = getCurrentConfig();
       generateNewArt(config);
       setPendingGeneration(false);
     }
@@ -590,8 +629,20 @@ export default function App() {
     }
   };
 
-  // Get current artwork
-  const currentArt = artQueue[currentArtIndex];
+  // Ensure currentArtIndex is always valid for the current artQueue
+  useEffect(() => {
+    if (artQueue.length > 0 && currentArtIndex >= artQueue.length) {
+      setCurrentArtIndex(artQueue.length - 1);
+    } else if (artQueue.length === 0 && currentArtIndex !== 0) {
+      // If queue becomes empty, reset index to 0 to correctly show "No artwork available"
+      setCurrentArtIndex(0);
+    }
+  }, [artQueue, currentArtIndex]);
+
+  // Get current artwork - use useMemo to recalculate when artQueue or currentArtIndex changes
+  const currentArt = useMemo(() => {
+    return artQueue[currentArtIndex];
+  }, [artQueue, currentArtIndex]);
 
   // Navigation functions
   const goToPrevious = () => {
@@ -607,7 +658,26 @@ export default function App() {
   };
 
   const goToLatest = () => {
+    if (artQueue.length > 0) {
     setCurrentArtIndex(artQueue.length - 1);
+    }
+  };
+
+  // Modal navigation functions
+  const goToPreviousModal = () => {
+    if (modalIndex > 0) {
+      const newIndex = modalIndex - 1;
+      setModalIndex(newIndex);
+      setModalArt(artQueue[newIndex]);
+    }
+  };
+
+  const goToNextModal = () => {
+    if (modalIndex < artQueue.length - 1) {
+      const newIndex = modalIndex + 1;
+      setModalIndex(newIndex);
+      setModalArt(artQueue[newIndex]);
+    }
   };
 
   // Random generation functions
@@ -855,29 +925,29 @@ export default function App() {
         currentSeed = addressToPRNGSeed(bitcoinAddress);
         setSeed(currentSeed);
       } else if (randomAll || randomSeed) {
-        currentSeed = generateRandomSeed();
-        setSeed(currentSeed); // Update state with new seed
-      }
-      if (randomAll || randomPaletteToggle) {
+      currentSeed = generateRandomSeed();
+      setSeed(currentSeed); // Update state with new seed
+    }
+    if (randomAll || randomPaletteToggle) {
         currentPalette = 'Random Madras';
         currentPaletteColors = randomPalette();
         setPaletteColors(currentPaletteColors);
-      }
-      if (randomAll || randomThreadSpacing) {
-        currentThreadSpacing = generateRandomThreadSpacing();
-        setThreadSpacing(currentThreadSpacing); // Update state with new thread spacing
-      }
-      if (randomAll || randomBgColor) {
-        currentBgColor = generateRandomBgColor();
-        setBgColor(currentBgColor); // Update state with new background color
-      }
-      if (randomAll || randomLint) {
-        currentLint = generateRandomLint();
-        setLint(currentLint); // Update state with new lint setting
-      }
-      if (randomAll || randomWeaveStyle) {
-        currentWeaveStyle = generateRandomWeaveStyle();
-        setWeaveStyle(currentWeaveStyle); // Update state with new weave style
+    }
+    if (randomAll || randomThreadSpacing) {
+      currentThreadSpacing = generateRandomThreadSpacing();
+      setThreadSpacing(currentThreadSpacing); // Update state with new thread spacing
+    }
+    if (randomAll || randomBgColor) {
+      currentBgColor = generateRandomBgColor();
+      setBgColor(currentBgColor); // Update state with new background color
+    }
+    if (randomAll || randomLint) {
+      currentLint = generateRandomLint();
+      setLint(currentLint); // Update state with new lint setting
+    }
+    if (randomAll || randomWeaveStyle) {
+      currentWeaveStyle = generateRandomWeaveStyle();
+      setWeaveStyle(currentWeaveStyle); // Update state with new weave style
       }
     }
 
@@ -989,15 +1059,114 @@ export default function App() {
 
   const saveToGallery = () => {
     if (currentArt) {
-      setGallery([...gallery, { 
+      const newGalleryItem = { 
+        id: currentArt.id,
+        html: currentArt.html,
+        config: currentArt.config,
+        timestamp: currentArt.timestamp,
         seed, 
         palette, 
         lint, 
         threadSpacing, 
         bgColor, 
         opaque,
+        weaveStyle,
         artId: currentArt.id 
-      }]);
+      };
+      
+      const updatedGallery = [...gallery, newGalleryItem];
+      setGallery(updatedGallery);
+      localStorage.setItem('gallery', JSON.stringify(updatedGallery));
+      alert('Saved to gallery!');
+    }
+  };
+
+  // Gallery management functions
+  const toggleGalleryItemSelection = (itemId: string) => {
+    setSelectedGalleryItems(prev => {
+      const newSet = new Set(prev);
+      if (newSet.has(itemId)) {
+        newSet.delete(itemId);
+      } else {
+        newSet.add(itemId);
+      }
+      return newSet;
+    });
+  };
+
+  const selectAllGalleryItems = () => {
+    const currentItems = getCurrentGalleryItems();
+    setSelectedGalleryItems(new Set(currentItems.map(item => item.id)));
+  };
+
+  const deselectAllGalleryItems = () => {
+    setSelectedGalleryItems(new Set());
+  };
+
+
+
+  const toggleListed = (itemId: string) => {
+    setListedItems(prev => {
+      const newSet = new Set(prev);
+      if (newSet.has(itemId)) {
+        newSet.delete(itemId);
+      } else {
+        newSet.add(itemId);
+      }
+      return newSet;
+    });
+  };
+
+  const deleteGalleryItems = (itemIds: string[]) => {
+    // Handle queue items deletion
+    if (galleryView === 'queue') {
+      setArtQueue(prev => {
+        const updated = prev.filter(item => !itemIds.includes(item.id));
+        
+        // Always ensure currentArtIndex is valid after deletion
+        let newIndex = currentArtIndex;
+        
+        // If current index is beyond the new array length, set to last item
+        if (currentArtIndex >= updated.length) {
+          newIndex = Math.max(0, updated.length - 1);
+        } else {
+          // Check if the current art was deleted
+          const currentArtId = prev[currentArtIndex]?.id;
+          if (currentArtId && itemIds.includes(currentArtId)) {
+            // Current art was deleted, adjust index to stay in valid range
+            newIndex = Math.max(0, Math.min(currentArtIndex, updated.length - 1));
+          }
+        }
+        
+        // Update the index immediately to prevent race conditions
+        setTimeout(() => setCurrentArtIndex(newIndex), 0);
+        
+        return updated;
+      });
+    } else {
+      // Handle gallery items deletion
+      setGallery(prev => {
+        const updated = prev.filter(item => !itemIds.includes(item.id));
+        localStorage.setItem('gallery', JSON.stringify(updated));
+        return updated;
+      });
+    }
+    
+    setSelectedGalleryItems(prev => {
+      const newSet = new Set(prev);
+      itemIds.forEach(id => newSet.delete(id));
+      return newSet;
+    });
+  };
+
+  const getCurrentGalleryItems = () => {
+    switch (galleryView) {
+      case 'queue':
+        return artQueue;
+      case 'listed':
+        return gallery.filter(item => listedItems.has(item.id));
+      default:
+        return gallery; // favorites = all saved gallery items
     }
   };
 
@@ -1008,16 +1177,33 @@ export default function App() {
 
   // Move Escape key handler to top-level useEffect
   useEffect(() => {
-    const handler = (e: KeyboardEvent) => { if (e.key === 'Escape') setModalArt(null); };
+    const handler = (e: KeyboardEvent) => { 
+      if (e.key === 'Escape') setModalArt(null);
+      if (modalArt) {
+        if (e.key === 'ArrowLeft' && modalIndex > 0) {
+          goToPreviousModal();
+        }
+        if (e.key === 'ArrowRight' && modalIndex < artQueue.length - 1) {
+          goToNextModal();
+        }
+      }
+    };
     if (modalArt) window.addEventListener('keydown', handler);
     return () => window.removeEventListener('keydown', handler);
-  }, [modalArt]);
+  }, [modalArt, modalIndex, artQueue.length]);
 
   return (
     <div className="EOL-dark-root">
-      {/* Backend Toggle UI - Hidden for showcase */}
-      {/* <div style={{margin: '16px 0', textAlign: 'center'}}>
-        <label style={{fontWeight: 500, fontSize: 15, color: '#fff', background: '#222', padding: '8px 16px', borderRadius: 8}}>
+      {/* Development Controls */}
+      <div style={{margin: '16px 0', padding: '16px', background: '#1a1a1a', borderRadius: 8, border: '1px solid #333'}}>
+        <h3 style={{margin: '0 0 12px 0', fontSize: '1rem', color: '#ff5c2a', fontWeight: 600}}>
+          <Settings size={16} style={{display: 'inline', marginRight: 8}} />
+          Development
+        </h3>
+        
+        {/* Backend URL Toggle */}
+        <div style={{marginBottom: 12}}>
+          <label style={{display: 'flex', alignItems: 'center', gap: 8, fontSize: '0.9rem', color: '#ccc'}}>
           <input
             type="checkbox"
             checked={backendUrl === 'https://checks-of-time-beta.onrender.com'}
@@ -1032,20 +1218,69 @@ export default function App() {
           />
           Use Render Backend ({backendUrl})
         </label>
-      </div> */}
+      </div>
 
-      {/* Permalink UI */}
-      <div style={{margin: '16px 0', textAlign: 'center'}}>
-        <div style={{
-          display: 'inline-flex',
-          alignItems: 'center',
-          gap: 12,
-          background: '#1a1a1a',
-          padding: '12px 16px',
-          borderRadius: 8,
-          border: '1px solid #333'
-        }}>
-          <span style={{fontSize: 14, color: '#ccc', fontWeight: 500}}>🔗 Short Permalink</span>
+        {/* Seed Input for Development */}
+        <div style={{marginBottom: 12}}>
+          <div style={{display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 8}}>
+            <label style={{fontSize: '0.9rem', color: '#ccc', display: 'flex', alignItems: 'center', gap: 8}}>
+              <Key size={14} />
+              Seed (Dev)
+            </label>
+            <button 
+              onClick={generateRandomSeed}
+              style={{
+                padding: '4px 8px',
+                background: '#333',
+                color: '#fff',
+                border: 'none',
+                borderRadius: 4,
+                cursor: 'pointer',
+                fontSize: '0.8rem',
+                fontWeight: 'bold',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center'
+              }}
+            >
+              <Dice6 size={14} />
+            </button>
+          </div>
+          <input
+            type="text"
+            value={seed}
+            onChange={(e) => setSeed(e.target.value)}
+            style={{
+              width: '100%',
+              padding: '8px 12px',
+              background: '#181818',
+              border: '1px solid #333',
+              borderRadius: 6,
+              color: '#fff',
+              fontSize: '0.9rem',
+              boxSizing: 'border-box'
+            }}
+            placeholder="Enter seed for development..."
+          />
+        </div>
+
+        {/* Permalink for Development */}
+        <div style={{marginBottom: 12}}>
+          <div style={{
+            display: 'inline-flex',
+            alignItems: 'center',
+            gap: 12,
+            background: '#1a1a1a',
+            padding: '12px 16px',
+            borderRadius: 8,
+            border: '1px solid #333',
+            width: '100%',
+            boxSizing: 'border-box'
+          }}>
+                      <span style={{fontSize: 14, color: '#ccc', fontWeight: 500, display: 'flex', alignItems: 'center', gap: 6}}>
+            <Copy size={14} />
+            Short Permalink
+          </span>
           <button
             onClick={() => {
               navigator.clipboard.writeText(window.location.href);
@@ -1059,21 +1294,28 @@ export default function App() {
               borderRadius: 4,
               cursor: 'pointer',
               fontSize: 12,
-              fontWeight: 500
+              fontWeight: 500,
+              display: 'flex',
+              alignItems: 'center',
+              gap: 4
             }}
           >
+            <Copy size={12} />
             Copy Link
           </button>
-          <div style={{fontSize: 11, color: '#888', maxWidth: 300, textAlign: 'left'}}>
-            Compact seed encodes all settings. Share this short link to recreate the exact artwork.
+            <div style={{fontSize: 11, color: '#888', maxWidth: 300, textAlign: 'left'}}>
+              Compact seed encodes all settings. Share this short link to recreate the exact artwork.
+            </div>
           </div>
         </div>
       </div>
+
+
       {/* Top Bar */}
       <header className="EOL-dark-topbar">
         <div className="EOL-dark-topbar-left">
-          <img src={logo} alt="Echoes of the Loom" className="EOL-dark-logo" />
-          <span className="EOL-dark-title">Echoes of the Loom</span>
+                        <img src={logo} alt="Madras Checks" className="EOL-dark-logo" />
+              <span className="EOL-dark-title">Madras Checks</span>
         </div>
         <nav className="EOL-dark-nav">
           <a href="#create">Create</a>
@@ -1085,55 +1327,36 @@ export default function App() {
       <div className="EOL-dark-main-layout">
         {/* Sidebar Controls */}
         <aside className="EOL-dark-sidebar">
+          {/* Main Generation Controls */}
+          <div className="EOL-dark-card" style={{marginBottom: 16}}>
+            <div style={{display: 'flex', flexDirection: 'column', gap: 12}}>
           <button 
             className="EOL-dark-generate" 
             onClick={regenerate}
             disabled={isGenerating}
             style={{
               opacity: isGenerating ? 0.6 : 1,
-              cursor: isGenerating ? 'not-allowed' : 'pointer'
-            }}
-          >
-            {isGenerating ? 'Generating...' : 'Generate Art'}
+                  cursor: isGenerating ? 'not-allowed' : 'pointer',
+                  padding: '12px 16px',
+                  fontSize: '1.1rem',
+                  fontWeight: 600
+                }}
+              >
+                {isGenerating ? '🔄 Generating...' : (
+                  <>
+                    <Sparkles size={16} style={{marginRight: 8}} />
+                    Generate Artwork
+                  </>
+                )}
           </button>
           
-          {/* Reload from URL button - Hidden for showcase */}
-          {/* <button 
-            onClick={() => {
-              const configLoaded = loadConfigFromURL();
-              if (configLoaded) {
-                // Generate art with loaded config after a small delay
-                setTimeout(() => {
-                  generateNewArt();
-                }, 100);
-              } else {
-                alert('No configuration found in URL');
-              }
-            }}
-            disabled={isGenerating}
-            style={{
-              width: '100%',
-              padding: '8px 16px',
-              background: isGenerating ? '#333' : '#2563eb',
-              color: '#fff',
-              border: 'none',
-              borderRadius: 6,
-              cursor: isGenerating ? 'not-allowed' : 'pointer',
-              fontSize: '0.9rem',
-              marginTop: 8,
-              fontWeight: 500
-            }}
-          >
-            🔗 Load from URL
-          </button> */}
-          
-          {/* Bulk Generation Buttons */}
-          <div style={{display: 'flex', gap: 8, marginTop: 12}}>
+              {/* Quick Actions */}
+              <div style={{display: 'flex', gap: 8}}>
             <button 
               onClick={() => generateMultipleArt(11)}
               disabled={isGenerating}
               style={{
-                padding: '8px 16px',
+                    padding: '8px 12px',
                 background: isGenerating ? '#333' : '#ff5c2a',
                 color: '#fff',
                 border: 'none',
@@ -1143,13 +1366,13 @@ export default function App() {
                 flex: 1
               }}
             >
-              {isGenerating ? 'Generating...' : 'Generate 11'}
+                  {isGenerating ? '...' : 'x11'}
             </button>
             <button 
               onClick={() => generateMultipleArt(111)}
               disabled={isGenerating}
               style={{
-                padding: '8px 16px',
+                    padding: '8px 12px',
                 background: isGenerating ? '#333' : '#ff5c2a',
                 color: '#fff',
                 border: 'none',
@@ -1159,13 +1382,11 @@ export default function App() {
                 flex: 1
               }}
             >
-              {isGenerating ? 'Generating...' : 'Generate 111'}
+                  {isGenerating ? '...' : 'x111'}
             </button>
           </div>
           
-          {/* Stop Bulk Generation Button */}
           {isBulkGenerating && (
-            <div style={{marginTop: 8}}>
               <button 
                 onClick={stopBulkGeneration}
                 style={{
@@ -1181,25 +1402,228 @@ export default function App() {
               >
                 ⏹ Stop Generation
               </button>
+              )}
+              </div>
+              </div>
+
+          {/* Core Art Settings */}
+          <div className="EOL-dark-card" style={{marginBottom: 16}}>
+            <h3 style={{margin: '0 0 16px 0', fontSize: '1rem', fontWeight: 600, color: '#fff'}}>🎨 Art Settings</h3>
+            
+
+
+            {/* Palette Setting */}
+            <div style={{marginBottom: 16}}>
+              <div style={{display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 8}}>
+                <label style={{fontSize: '0.9rem', color: '#ccc', display: 'flex', flexDirection: 'row', alignItems: 'center', gap: 8}}>
+                  <Palette size={14} />
+                  Palette
+                </label>
+              <button 
+                  onClick={() => setRandomPaletteToggle(!randomPaletteToggle)}
+                style={{
+                    padding: '4px 8px',
+                    background: randomPaletteToggle ? '#ff5c2a' : '#333',
+                  color: '#fff',
+                  border: 'none',
+                    borderRadius: 4,
+                  cursor: 'pointer',
+                    fontSize: '0.8rem',
+                  fontWeight: 'bold'
+                }}
+              >
+                  <Shuffle size={12} />
+              </button>
             </div>
-          )}
-          
-          {/* Bitcoin Integration Controls */}
-          <div className="EOL-dark-card">
-            <div style={{display:'flex',flexDirection:'row',alignItems:'center',justifyContent:'space-between',width:'100%',marginBottom:12}}>
-              <span style={{fontSize: '1.15rem', fontWeight: 500}}>₿ Bitcoin Integration</span>
+              <PaletteDropdown 
+                palette={palette} 
+                setPalette={setPalette} 
+                groups={PALETTE_GROUPS} 
+                getColors={name => name==='Random Madras'?randomPalette():PALETTE_COLORS[name]} 
+                paletteColors={paletteColors} 
+              />
+            </div>
+
+            {/* Weave Style Setting */}
+            <div style={{marginBottom: 16}}>
+              <div style={{display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 8}}>
+                <label style={{fontSize: '0.9rem', color: '#ccc', display: 'flex', flexDirection: 'row', alignItems: 'center', gap: 8}}>
+                  <Sparkles size={14} />
+                  Weave Style
+                </label>
+              <button 
+                  onClick={() => setRandomWeaveStyle(!randomWeaveStyle)}
+                style={{
+                    padding: '4px 8px',
+                    background: randomWeaveStyle ? '#ff5c2a' : '#333',
+                  color: '#fff',
+                  border: 'none',
+                  borderRadius: 4,
+                  cursor: 'pointer',
+                  fontSize: '0.8rem',
+                    fontWeight: 'bold'
+                }}
+              >
+                  <Shuffle size={12} />
+              </button>
+              </div>
+              <div style={{display: 'flex', gap: 12}}>
+                <label style={{display: 'flex', alignItems: 'center', gap: 6, fontSize: '0.9rem'}}>
+                  <input 
+                    type="radio" 
+                    name="weaveStyle" 
+                    value="classic" 
+                    checked={weaveStyle==='classic'} 
+                    onChange={()=>setWeaveStyle('classic')} 
+                  />
+                  Classic
+                </label>
+                <label style={{display: 'flex', alignItems: 'center', gap: 6, fontSize: '0.9rem'}}>
+                  <input 
+                    type="radio" 
+                    name="weaveStyle" 
+                    value="woven" 
+                    checked={weaveStyle==='woven'} 
+                    onChange={()=>setWeaveStyle('woven')} 
+                  />
+                  Woven
+                </label>
+              </div>
+            </div>
+
+            {/* Weave Tightness Setting */}
+            <div style={{marginBottom: 16}}>
+              <div style={{display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 8}}>
+                <label style={{fontSize: '0.9rem', color: '#ccc', display: 'flex', flexDirection: 'row', alignItems: 'center', gap: 8}}>
+                  <Settings size={14} />
+                  Weave Tightness: {threadSpacing === 1 ? 'Very Tight' : threadSpacing === 5 ? 'Loose' : threadSpacing.toFixed(1)}
+                </label>
+              <button 
+                onClick={() => setRandomThreadSpacing(!randomThreadSpacing)}
+                style={{
+                    padding: '4px 8px',
+                  background: randomThreadSpacing ? '#ff5c2a' : '#333',
+                  color: '#fff',
+                  border: 'none',
+                  borderRadius: 4,
+                  cursor: 'pointer',
+                  fontSize: '0.8rem',
+                    fontWeight: 'bold'
+                }}
+              >
+                  <Shuffle size={12} />
+              </button>
+              </div>
+              <input 
+                type="range" 
+                min={1} 
+                max={5} 
+                step={0.1} 
+                value={threadSpacing} 
+                onChange={e => setThreadSpacing(Number(e.target.value))}
+                style={{width: '100%'}}
+              />
+            </div>
+
+            {/* Background Color Setting */}
+            <div style={{marginBottom: 16}}>
+              <div style={{display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 8}}>
+                <label style={{fontSize: '0.9rem', color: '#ccc', display: 'flex', flexDirection: 'row', alignItems: 'center', gap: 8}}>
+                  <Palette size={14} />
+                  Background Color
+                </label>
+              <button 
+                onClick={() => setRandomBgColor(!randomBgColor)}
+                style={{
+                    padding: '4px 8px',
+                  background: randomBgColor ? '#ff5c2a' : '#333',
+                  color: '#fff',
+                  border: 'none',
+                  borderRadius: 4,
+                  cursor: 'pointer',
+                  fontSize: '0.8rem',
+                    fontWeight: 'bold'
+                }}
+              >
+                  <Shuffle size={12} />
+              </button>
+              </div>
+              <BackgroundColorPicker bgColor={bgColor} setBgColor={setBgColor} opaque={opaque} setOpaque={setOpaque} />
+            </div>
+
+            {/* Lint Setting */}
+            <div style={{marginBottom: 16}}>
+              <div style={{display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 8}}>
+                <label style={{fontSize: '0.9rem', color: '#ccc', display: 'flex', flexDirection: 'row', alignItems: 'center', gap: 8}}>
+                  <Sparkles size={14} />
+                  Fresh from Loom
+                </label>
+              <button 
+                onClick={() => setRandomLint(!randomLint)}
+                style={{
+                    padding: '4px 8px',
+                  background: randomLint ? '#ff5c2a' : '#333',
+                  color: '#fff',
+                  border: 'none',
+                  borderRadius: 4,
+                  cursor: 'pointer',
+                  fontSize: '0.8rem',
+                    fontWeight: 'bold'
+                  }}
+                >
+                  <Shuffle size={12} />
+                </button>
+              </div>
               <div 
-                onClick={() => setBitcoinMode(!bitcoinMode)}
+                onClick={() => setLint(!lint)}
+                style={{
+                  width: 44,
+                  height: 24,
+                  background: lint ? '#ff5c2a' : '#333',
+                  borderRadius: 12,
+                  position: 'relative',
+                  cursor: 'pointer',
+                  transition: 'background 0.2s ease',
+                  border: '1px solid #555'
+                }}
+              >
+                <div style={{
+                  width: 18,
+                  height: 18,
+                  background: '#fff',
+                  borderRadius: '50%',
+                  position: 'absolute',
+                  top: 2,
+                  left: lint ? 22 : 2,
+                  transition: 'left 0.2s ease',
+                  boxShadow: '0 1px 3px rgba(0,0,0,0.3)'
+                }} />
+              </div>
+            </div>
+          </div>
+
+          {/* Bitcoin Integration - Collapsible */}
+          <div className="EOL-dark-card" style={{marginBottom: 16}}>
+            <div 
+              style={{
+                  display: 'flex',
+                  alignItems: 'center',
+                justifyContent: 'space-between',
+                cursor: 'pointer',
+                padding: '8px 0'
+              }}
+              onClick={() => setBitcoinMode(!bitcoinMode)}
+            >
+              <h3 style={{margin: 0, fontSize: '1rem', fontWeight: 600, color: '#fff'}}>₿ Bitcoin Integration</h3>
+              <div 
                 style={{
                   width: 44,
                   height: 24,
                   background: bitcoinMode ? '#ff5c2a' : '#333',
                   borderRadius: 12,
                   position: 'relative',
-                  cursor: 'pointer',
                   transition: 'background 0.2s ease',
-                  border: '1px solid #555',
-                  marginLeft: 16
+                  border: '1px solid #555'
                 }}
               >
                 <div style={{
@@ -1217,113 +1641,72 @@ export default function App() {
             </div>
             
             {bitcoinMode && (
-              <div style={{display:'flex',flexDirection:'column',gap:12}}>
-                {/* Seed Mode Selection */}
-                <div>
-                  <label style={{fontSize:'0.9rem',color:'#ccc',marginBottom:8,display:'block'}}>Seed Source</label>
-                  <div style={{display:'flex',gap:8,flexWrap:'wrap'}}>
-                    <button 
-                      onClick={() => setBitcoinSeedMode('none')}
-                      style={{
-                        padding: '4px 12px',
-                        background: bitcoinSeedMode === 'none' ? '#ff5c2a' : '#333',
-                        color: '#fff',
-                        border: 'none',
-                        borderRadius: 4,
-                        cursor: 'pointer',
-                        fontSize: '0.8rem'
-                      }}
-                    >
-                      Random
-                    </button>
-                    <button 
-                      onClick={() => setBitcoinSeedMode('hash')}
-                      style={{
-                        padding: '4px 12px',
-                        background: bitcoinSeedMode === 'hash' ? '#ff5c2a' : '#333',
-                        color: '#fff',
-                        border: 'none',
-                        borderRadius: 4,
-                        cursor: 'pointer',
-                        fontSize: '0.8rem'
-                      }}
-                    >
-                      Block/Tx Hash
-                    </button>
-                    <button 
-                      onClick={() => setBitcoinSeedMode('address')}
-                      style={{
-                        padding: '4px 12px',
-                        background: bitcoinSeedMode === 'address' ? '#ff5c2a' : '#333',
-                        color: '#fff',
-                        border: 'none',
-                        borderRadius: 4,
-                        cursor: 'pointer',
-                        fontSize: '0.8rem'
-                      }}
-                    >
-                      Address
-                    </button>
-                  </div>
-                </div>
+              <div style={{marginTop: 12, paddingTop: 12, borderTop: '1px solid #333'}}>
+                {/* Seed Source */}
+                <div style={{marginBottom: 12}}>
+                  <label style={{fontSize: '0.9rem', color: '#ccc', marginBottom: 6, display: 'block'}}>Seed Source</label>
+                  <div style={{display: 'flex', gap: 4, flexWrap: 'wrap'}}>
+                    {[
+                      { value: 'none', label: 'Random' },
+                      { value: 'hash', label: 'Block/Tx Hash' },
+                      { value: 'address', label: 'Address' }
+                    ].map(({ value, label }) => (
+              <button 
+                        key={value}
+                        onClick={() => setBitcoinSeedMode(value as any)}
+                style={{
+                          padding: '4px 8px',
+                          background: bitcoinSeedMode === value ? '#ff5c2a' : '#333',
+                  color: '#fff',
+                  border: 'none',
+                  borderRadius: 4,
+                  cursor: 'pointer',
+                          fontSize: '0.8rem'
+                }}
+              >
+                        {label}
+              </button>
+                    ))}
+            </div>
+          </div>
 
-                {/* Hash Input */}
-                {bitcoinSeedMode === 'hash' && (
-                  <div>
-                    <label style={{fontSize:'0.9rem',color:'#ccc',marginBottom:4,display:'block'}}>Block/Transaction Hash</label>
+                {/* Hash/Address Input */}
+                {(bitcoinSeedMode === 'hash' || bitcoinSeedMode === 'address') && (
+                  <div style={{marginBottom: 12}}>
+                    <label style={{fontSize: '0.9rem', color: '#ccc', marginBottom: 4, display: 'block'}}>
+                      {bitcoinSeedMode === 'hash' ? 'Block/Transaction Hash' : 'Bitcoin Address'}
+            </label>
                     <input
                       type="text"
-                      value={bitcoinHash}
-                      onChange={(e) => setBitcoinHash(e.target.value)}
-                      placeholder="Enter block or transaction hash..."
+                      value={bitcoinSeedMode === 'hash' ? bitcoinHash : bitcoinAddress}
+                      onChange={(e) => bitcoinSeedMode === 'hash' ? setBitcoinHash(e.target.value) : setBitcoinAddress(e.target.value)}
+                      placeholder={bitcoinSeedMode === 'hash' ? 'Enter block or transaction hash...' : 'Enter Bitcoin address...'}
                       style={{
                         width: '100%',
-                        padding: '8px 12px',
+                        padding: '6px 8px',
                         background: '#333',
                         border: '1px solid #555',
-                        borderRadius: 6,
+                        borderRadius: 4,
                         color: '#fff',
-                        fontSize: '0.9rem',
+                        fontSize: '0.8rem',
                         boxSizing: 'border-box'
                       }}
                     />
-                  </div>
+          </div>
                 )}
 
-                {/* Address Input */}
-                {bitcoinSeedMode === 'address' && (
-                  <div>
-                    <label style={{fontSize:'0.9rem',color:'#ccc',marginBottom:4,display:'block'}}>Bitcoin Address</label>
-                    <input
-                      type="text"
-                      value={bitcoinAddress}
-                      onChange={(e) => setBitcoinAddress(e.target.value)}
-                      placeholder="Enter Bitcoin address..."
-                      style={{
-                        width: '100%',
-                        padding: '8px 12px',
-                        background: '#333',
-                        border: '1px solid #555',
-                        borderRadius: 6,
-                        color: '#fff',
-                        fontSize: '0.9rem',
-                        boxSizing: 'border-box'
-                      }}
-                    />
-                  </div>
-                )}
-
-                {/* Bitcoin Data Mode */}
-                <div>
-                  <div style={{display:'flex',alignItems:'center',justifyContent:'space-between',marginBottom:8}}>
-                    <label style={{fontSize:'0.9rem',color:'#ccc'}}>Bitcoin Data Driven</label>
+                {/* Advanced Bitcoin Features */}
+                <div style={{display: 'flex', flexDirection: 'column', gap: 8}}>
+                  {/* Bitcoin Data Mode */}
+                  <div style={{display: 'flex', alignItems: 'center', justifyContent: 'space-between'}}>
+                    <label style={{fontSize: '0.8rem', color: '#ccc'}}>Data Driven</label>
                     <div 
                       onClick={() => setBitcoinDataMode(!bitcoinDataMode)}
                       style={{
-                        width: 36,
-                        height: 20,
+                        width: 32,
+                        height: 18,
                         background: bitcoinDataMode ? '#ff5c2a' : '#333',
-                        borderRadius: 10,
+                        borderRadius: 9,
                         position: 'relative',
                         cursor: 'pointer',
                         transition: 'background 0.2s ease',
@@ -1331,129 +1714,102 @@ export default function App() {
                       }}
                     >
                       <div style={{
-                        width: 14,
-                        height: 14,
+                        width: 12,
+                        height: 12,
                         background: '#fff',
                         borderRadius: '50%',
                         position: 'absolute',
                         top: 2,
-                        left: bitcoinDataMode ? 18 : 2,
+                        left: bitcoinDataMode ? 16 : 2,
                         transition: 'left 0.2s ease',
                         boxShadow: '0 1px 3px rgba(0,0,0,0.3)'
                       }} />
-                    </div>
-                  </div>
-                  {bitcoinDataMode && (
-                    <div style={{display:'flex',gap:6,flexWrap:'wrap'}}>
-                      {['blockHeight', 'difficulty', 'mempoolSize', 'fees'].map(param => (
-                        <button
-                          key={param}
-                          onClick={() => {
-                            if (bitcoinDataParams.includes(param)) {
-                              setBitcoinDataParams(bitcoinDataParams.filter(p => p !== param));
-                            } else {
-                              setBitcoinDataParams([...bitcoinDataParams, param]);
-                            }
-                          }}
-                          style={{
-                            padding: '3px 8px',
-                            background: bitcoinDataParams.includes(param) ? '#ff5c2a' : '#444',
-                            color: '#fff',
-                            border: '1px solid #666',
-                            borderRadius: 3,
-                            cursor: 'pointer',
-                            fontSize: '0.75rem'
-                          }}
-                        >
-                          {param}
-                        </button>
-                      ))}
-                    </div>
-                  )}
-                </div>
+          </div>
+            </div>
 
-                {/* Price-Based Art */}
-                <div style={{display:'flex',alignItems:'center',justifyContent:'space-between'}}>
-                  <label style={{fontSize:'0.9rem',color:'#ccc'}}>Price-Based Art</label>
-                  <div 
-                    onClick={() => setPriceBasedArt(!priceBasedArt)}
-                    style={{
-                      width: 36,
-                      height: 20,
-                      background: priceBasedArt ? '#ff5c2a' : '#333',
-                      borderRadius: 10,
-                      position: 'relative',
-                      cursor: 'pointer',
-                      transition: 'background 0.2s ease',
-                      border: '1px solid #555'
-                    }}
-                  >
-                    <div style={{
-                      width: 14,
-                      height: 14,
-                      background: '#fff',
-                      borderRadius: '50%',
-                      position: 'absolute',
-                      top: 2,
-                      left: priceBasedArt ? 18 : 2,
-                      transition: 'left 0.2s ease',
-                      boxShadow: '0 1px 3px rgba(0,0,0,0.3)'
-                    }} />
-                  </div>
-                </div>
+                  {/* Price-Based Art */}
+                  <div style={{display: 'flex', alignItems: 'center', justifyContent: 'space-between'}}>
+                    <label style={{fontSize: '0.8rem', color: '#ccc'}}>Price-Based Art</label>
+                    <div 
+                      onClick={() => setPriceBasedArt(!priceBasedArt)}
+                      style={{
+                        width: 32,
+                        height: 18,
+                        background: priceBasedArt ? '#ff5c2a' : '#333',
+                        borderRadius: 9,
+                        position: 'relative',
+                        cursor: 'pointer',
+                        transition: 'background 0.2s ease',
+                        border: '1px solid #555'
+                      }}
+                    >
+                      <div style={{
+                        width: 12,
+                        height: 12,
+                        background: '#fff',
+                        borderRadius: '50%',
+                        position: 'absolute',
+                        top: 2,
+                        left: priceBasedArt ? 16 : 2,
+                        transition: 'left 0.2s ease',
+                        boxShadow: '0 1px 3px rgba(0,0,0,0.3)'
+                      }} />
+          </div>
+          </div>
 
-                {/* Dynamic Fade */}
-                <div style={{display:'flex',alignItems:'center',justifyContent:'space-between'}}>
-                  <label style={{fontSize:'0.9rem',color:'#ccc'}}>Dynamic Fade (Price)</label>
-                  <div 
-                    onClick={() => setDynamicFadeMode(!dynamicFadeMode)}
-                    style={{
-                      width: 36,
-                      height: 20,
-                      background: dynamicFadeMode ? '#ff5c2a' : '#333',
-                      borderRadius: 10,
-                      position: 'relative',
-                      cursor: 'pointer',
-                      transition: 'background 0.2s ease',
-                      border: '1px solid #555'
-                    }}
-                  >
-                    <div style={{
-                      width: 14,
-                      height: 14,
-                      background: '#fff',
-                      borderRadius: '50%',
-                      position: 'absolute',
-                      top: 2,
-                      left: dynamicFadeMode ? 18 : 2,
-                      transition: 'left 0.2s ease',
-                      boxShadow: '0 1px 3px rgba(0,0,0,0.3)'
-                    }} />
-                  </div>
-                </div>
-                
+                  {/* Dynamic Fade */}
+                  <div style={{display: 'flex', alignItems: 'center', justifyContent: 'space-between'}}>
+                    <label style={{fontSize: '0.8rem', color: '#ccc'}}>Dynamic Fade</label>
+                    <div 
+                      onClick={() => setDynamicFadeMode(!dynamicFadeMode)}
+                style={{
+                        width: 32,
+                        height: 18,
+                        background: dynamicFadeMode ? '#ff5c2a' : '#333',
+                        borderRadius: 9,
+                  position: 'relative',
+                  cursor: 'pointer',
+                  transition: 'background 0.2s ease',
+                        border: '1px solid #555'
+                }}
+              >
+                <div style={{
+                        width: 12,
+                        height: 12,
+                  background: '#fff',
+                  borderRadius: '50%',
+                  position: 'absolute',
+                  top: 2,
+                        left: dynamicFadeMode ? 16 : 2,
+                  transition: 'left 0.2s ease',
+                  boxShadow: '0 1px 3px rgba(0,0,0,0.3)'
+                }} />
+              </div>
+            </div>
+          </div>
+
                 {/* Fade Level Indicator */}
                 {dynamicFadeMode && (
-                  <div style={{marginTop:8}}>
-                    <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:4}}>
-                      <span style={{fontSize:'0.8rem',color:'#999'}}>Current Fade</span>
-                      <span style={{fontSize:'0.8rem',color: fadeLevel > 0.7 ? '#4ade80' : fadeLevel > 0.5 ? '#fbbf24' : '#ef4444'}}>
+                  <div style={{marginTop: 12, paddingTop: 8, borderTop: '1px solid #333'}}>
+                    <div style={{display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 4}}>
+                      <span style={{fontSize: '0.8rem', color: '#999'}}>Current Fade</span>
+                      <span style={{fontSize: '0.8rem', color: fadeLevel > 0.7 ? '#4ade80' : fadeLevel > 0.5 ? '#fbbf24' : '#ef4444'}}>
                         {Math.round(fadeLevel * 100)}%
                       </span>
                     </div>
                     <div style={{
-                      width:'100%',
-                      height:4,
-                      background:'#333',
-                      borderRadius:2,
-                      overflow:'hidden'
+                      width: '100%',
+                      height: 4,
+                      background: '#333',
+                      borderRadius: 2,
+                      overflow: 'hidden'
                     }}>
                       <div style={{
-                        width:`${fadeLevel * 100}%`,
-                        height:'100%',
+                        width: `${fadeLevel * 100}%`,
+                        height: '100%',
                         background: fadeLevel > 0.7 ? '#4ade80' : fadeLevel > 0.5 ? '#fbbf24' : '#ef4444',
-                        borderRadius:2,
-                        transition:'all 0.3s ease'
+                        borderRadius: 2,
+                        transition: 'all 0.3s ease'
                       }} />
                     </div>
                   </div>
@@ -1461,258 +1817,60 @@ export default function App() {
               </div>
             )}
           </div>
-          
-          {/* Queue Navigation */}
-          {artQueue.length > 1 && (
-            <div className="EOL-dark-card">
-              <div style={{display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8}}>
-                <span style={{fontSize: '1rem', fontWeight: 500}}>Queue Navigation</span>
-                <span style={{fontSize: '0.9rem', color: '#888'}}>
-                  {currentArtIndex + 1} / {artQueue.length}
-                </span>
-              </div>
-              <div style={{display: 'flex', gap: 8}}>
-                <button 
-                  onClick={goToPrevious}
-                  disabled={currentArtIndex <= 0}
-                  style={{
-                    padding: '6px 12px',
-                    background: currentArtIndex <= 0 ? '#333' : '#ff5c2a',
-                    color: '#fff',
-                    border: 'none',
-                    borderRadius: 6,
-                    cursor: currentArtIndex <= 0 ? 'not-allowed' : 'pointer',
-                    fontSize: '0.9rem'
-                  }}
-                >
-                  ← Prev
-                </button>
-                <button 
-                  onClick={goToNext}
-                  disabled={currentArtIndex >= artQueue.length - 1}
-                  style={{
-                    padding: '6px 12px',
-                    background: currentArtIndex >= artQueue.length - 1 ? '#333' : '#ff5c2a',
-                    color: '#fff',
-                    border: 'none',
-                    borderRadius: 6,
-                    cursor: currentArtIndex >= artQueue.length - 1 ? 'not-allowed' : 'pointer',
-                    fontSize: '0.9rem'
-                  }}
-                >
-                  Next →
-                </button>
-                <button 
-                  onClick={goToLatest}
-                  disabled={currentArtIndex >= artQueue.length - 1}
-                  style={{
-                    padding: '6px 12px',
-                    background: currentArtIndex >= artQueue.length - 1 ? '#333' : '#ff5c2a',
-                    color: '#fff',
-                    border: 'none',
-                    borderRadius: 6,
-                    cursor: currentArtIndex >= artQueue.length - 1 ? 'not-allowed' : 'pointer',
-                    fontSize: '0.9rem'
-                  }}
-                >
-                  Latest
-                </button>
-              </div>
-            </div>
-          )}
 
-          {/* Random Controls */}
+
+
+          {/* Actions */}
           <div className="EOL-dark-card">
-            <div style={{display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12}}>
-              <span style={{fontSize: '1rem', fontWeight: 500}}>Random Controls</span>
+            <h3 style={{margin: '0 0 12px 0', fontSize: '1rem', fontWeight: 600, color: '#fff'}}>⚡ Actions</h3>
+            <div style={{display: 'flex', flexDirection: 'column', gap: 8}}>
               <button 
-                onClick={() => setRandomAll(!randomAll)}
+                onClick={saveToGallery}
                 style={{
-                  padding: '6px 12px',
-                  background: randomAll ? '#ff5c2a' : '#333',
+                  padding: '8px 12px',
+                  background: '#2563eb',
                   color: '#fff',
                   border: 'none',
                   borderRadius: 6,
                   cursor: 'pointer',
                   fontSize: '0.9rem',
-                  fontWeight: 'bold'
+                  fontWeight: 500
+                }}
+                              >
+                  <Save size={16} style={{marginRight: 8}} />
+                  Save to Gallery
+                </button>
+              <button 
+                onClick={() => alert('Download .HTML coming soon!')}
+                style={{
+                  padding: '8px 12px',
+                  background: '#059669',
+                  color: '#fff',
+                  border: 'none',
+                  borderRadius: 6,
+                  cursor: 'pointer',
+                  fontSize: '0.9rem',
+                  fontWeight: 500
                 }}
               >
-                {randomAll ? '🎲 All On' : '🎲 All Off'}
+                📥 Download .HTML
+              </button>
+              <button 
+                onClick={() => alert('Mint to Ordinals coming soon!')}
+                style={{
+                  padding: '8px 12px',
+                  background: '#7c3aed',
+                  color: '#fff',
+                  border: 'none',
+                  borderRadius: 6,
+                  cursor: 'pointer',
+                  fontSize: '0.9rem',
+                  fontWeight: 500
+                }}
+              >
+                🪙 Mint to Ordinals
               </button>
             </div>
-            <div style={{display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: 8}}>
-              <button 
-                onClick={() => setRandomSeed(!randomSeed)}
-                style={{
-                  padding: '6px 8px',
-                  background: randomSeed ? '#ff5c2a' : '#333',
-                  color: '#fff',
-                  border: 'none',
-                  borderRadius: 4,
-                  cursor: 'pointer',
-                  fontSize: '0.8rem',
-                  display: 'flex',
-                  alignItems: 'center',
-                  gap: 4
-                }}
-              >
-                <span>🎲</span> Seed
-              </button>
-              <button 
-                onClick={() => setRandomPaletteToggle(!randomPaletteToggle)}
-                style={{
-                  padding: '6px 8px',
-                  background: randomPaletteToggle ? '#ff5c2a' : '#333',
-                  color: '#fff',
-                  border: 'none',
-                  borderRadius: 4,
-                  cursor: 'pointer',
-                  fontSize: '0.8rem',
-                  display: 'flex',
-                  alignItems: 'center',
-                  gap: 4
-                }}
-              >
-                <span>🎨</span> Palette
-              </button>
-              <button 
-                onClick={() => setRandomThreadSpacing(!randomThreadSpacing)}
-                style={{
-                  padding: '6px 8px',
-                  background: randomThreadSpacing ? '#ff5c2a' : '#333',
-                  color: '#fff',
-                  border: 'none',
-                  borderRadius: 4,
-                  cursor: 'pointer',
-                  fontSize: '0.8rem',
-                  display: 'flex',
-                  alignItems: 'center',
-                  gap: 4
-                }}
-              >
-                <span>📏</span> Tightness
-              </button>
-              <button 
-                onClick={() => setRandomBgColor(!randomBgColor)}
-                style={{
-                  padding: '6px 8px',
-                  background: randomBgColor ? '#ff5c2a' : '#333',
-                  color: '#fff',
-                  border: 'none',
-                  borderRadius: 4,
-                  cursor: 'pointer',
-                  fontSize: '0.8rem',
-                  display: 'flex',
-                  alignItems: 'center',
-                  gap: 4
-                }}
-              >
-                <span>🎨</span> Background
-              </button>
-              <button 
-                onClick={() => setRandomLint(!randomLint)}
-                style={{
-                  padding: '6px 8px',
-                  background: randomLint ? '#ff5c2a' : '#333',
-                  color: '#fff',
-                  border: 'none',
-                  borderRadius: 4,
-                  cursor: 'pointer',
-                  fontSize: '0.8rem',
-                  display: 'flex',
-                  alignItems: 'center',
-                  gap: 4
-                }}
-              >
-                <span>🧶</span> Lint
-              </button>
-              <button 
-                onClick={() => setRandomWeaveStyle(!randomWeaveStyle)}
-                style={{
-                  padding: '6px 8px',
-                  background: randomWeaveStyle ? '#ff5c2a' : '#333',
-                  color: '#fff',
-                  border: 'none',
-                  borderRadius: 4,
-                  cursor: 'pointer',
-                  fontSize: '0.8rem',
-                  display: 'flex',
-                  alignItems: 'center',
-                  gap: 4
-                }}
-              >
-                <span>🧵</span> Style
-              </button>
-            </div>
-          </div>
-
-          <div className="EOL-dark-card">
-            <label>Palette
-              <PaletteDropdown palette={palette} setPalette={setPalette} groups={PALETTE_GROUPS} getColors={name => name==='Random Madras'?randomPalette():PALETTE_COLORS[name]} paletteColors={paletteColors} />
-            </label>
-          </div>
-
-          <div className="EOL-dark-card">
-            <label>Weave Tightness
-              <input type="range" min={1} max={5} step={0.1} value={threadSpacing} onChange={e => setThreadSpacing(Number(e.target.value))} />
-              <span>{threadSpacing === 1 ? 'Very Tight' : threadSpacing === 5 ? 'Loose' : threadSpacing.toFixed(1) + 'px'}</span>
-            </label>
-          </div>
-          <div className="EOL-dark-card">
-            <label>Weave Style</label>
-            <div style={{display:'flex',gap:16,marginTop:4}}>
-              <label style={{display:'flex',alignItems:'center',gap:6}}>
-                <input type="radio" name="weaveStyle" value="classic" checked={weaveStyle==='classic'} onChange={()=>setWeaveStyle('classic')} />
-                Classic
-              </label>
-              <label style={{display:'flex',alignItems:'center',gap:6}}>
-                <input type="radio" name="weaveStyle" value="woven" checked={weaveStyle==='woven'} onChange={()=>setWeaveStyle('woven')} />
-                Woven
-              </label>
-            </div>
-          </div>
-          <div className="EOL-dark-card">
-            <label>Background Color
-              <BackgroundColorPicker bgColor={bgColor} setBgColor={setBgColor} opaque={opaque} setOpaque={setOpaque} />
-            </label>
-          </div>
-
-          <div className="EOL-dark-card">
-            <div style={{display:'flex',flexDirection:'row',alignItems:'center',justifyContent:'space-between',width:'100%'}}>
-              <span style={{fontSize: '1.15rem', fontWeight: 500}}>Fresh from Loom</span>
-              <div 
-                onClick={() => setLint(!lint)}
-                style={{
-                  width: 44,
-                  height: 24,
-                  background: lint ? '#ff5c2a' : '#333',
-                  borderRadius: 12,
-                  position: 'relative',
-                  cursor: 'pointer',
-                  transition: 'background 0.2s ease',
-                  border: '1px solid #555',
-                  marginLeft: 16
-                }}
-              >
-                <div style={{
-                  width: 18,
-                  height: 18,
-                  background: '#fff',
-                  borderRadius: '50%',
-                  position: 'absolute',
-                  top: 2,
-                  left: lint ? 22 : 2,
-                  transition: 'left 0.2s ease',
-                  boxShadow: '0 1px 3px rgba(0,0,0,0.3)'
-                }} />
-              </div>
-            </div>
-          </div>
-          <div className="EOL-dark-card EOL-dark-actions">
-            <button onClick={saveToGallery}>Save to Gallery</button>
-            <button onClick={() => alert('Download .HTML coming soon!')}>Download .HTML</button>
-            <button onClick={() => alert('Mint to Ordinals coming soon!')}>Mint to Ordinals</button>
           </div>
         </aside>
         {/* Canvas Area */}
@@ -1724,6 +1882,7 @@ export default function App() {
               position: 'relative',
               background: isFullscreen ? '#000' : undefined,
               display: 'flex',
+              flexDirection: 'column',
               alignItems: 'center',
               justifyContent: 'center',
               minHeight: isFullscreen ? '100vh' : undefined,
@@ -1779,6 +1938,167 @@ export default function App() {
                 {isGenerating ? 'Generating artwork...' : 'No artwork available'}
               </div>
             )}
+
+
+            {/* Left Navigation Button */}
+            {artQueue.length > 1 && !isFullscreen && (
+              <button
+                onClick={goToPrevious}
+                disabled={currentArtIndex <= 0}
+                style={{
+                  position: 'absolute',
+                  left: '-60px',
+                  top: '50%',
+                  transform: 'translateY(-50%)',
+                  width: '48px',
+                  height: '48px',
+                  background: currentArtIndex <= 0 ? 'rgba(51, 51, 51, 0.3)' : 'rgba(255, 107, 53, 0.9)',
+                  border: '2px solid rgba(255, 107, 53, 0.5)',
+                  borderRadius: '50%',
+                  color: '#fff',
+                  fontSize: '20px',
+                  cursor: currentArtIndex <= 0 ? 'not-allowed' : 'pointer',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  transition: 'all 0.3s ease',
+                  zIndex: 10,
+                  backdropFilter: 'blur(10px)',
+                  boxShadow: '0 4px 16px rgba(0, 0, 0, 0.3)'
+                }}
+                onMouseEnter={(e) => {
+                  if (currentArtIndex > 0) {
+                    e.currentTarget.style.background = 'rgba(255, 107, 53, 1)';
+                    e.currentTarget.style.transform = 'translateY(-50%) scale(1.1)';
+                    e.currentTarget.style.boxShadow = '0 8px 24px rgba(255, 107, 53, 0.4)';
+                  }
+                }}
+                onMouseLeave={(e) => {
+                  if (currentArtIndex > 0) {
+                    e.currentTarget.style.background = 'rgba(255, 107, 53, 0.9)';
+                    e.currentTarget.style.transform = 'translateY(-50%) scale(1)';
+                    e.currentTarget.style.boxShadow = '0 4px 16px rgba(0, 0, 0, 0.3)';
+                  }
+                }}
+                title="Previous artwork"
+                              >
+                  <ChevronLeft size={20} />
+                </button>
+            )}
+
+            {/* Right Navigation Button */}
+            {artQueue.length > 1 && !isFullscreen && (
+              <button
+                onClick={goToNext}
+                disabled={currentArtIndex >= artQueue.length - 1}
+                style={{
+                  position: 'absolute',
+                  right: '-60px',
+                  top: '50%',
+                  transform: 'translateY(-50%)',
+                  width: '48px',
+                  height: '48px',
+                  background: currentArtIndex >= artQueue.length - 1 ? 'rgba(51, 51, 51, 0.3)' : 'rgba(255, 107, 53, 0.9)',
+                  border: '2px solid rgba(255, 107, 53, 0.5)',
+                  borderRadius: '50%',
+                  color: '#fff',
+                  fontSize: '20px',
+                  cursor: currentArtIndex >= artQueue.length - 1 ? 'not-allowed' : 'pointer',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  transition: 'all 0.3s ease',
+                  zIndex: 10,
+                  backdropFilter: 'blur(10px)',
+                  boxShadow: '0 4px 16px rgba(0, 0, 0, 0.3)'
+                }}
+                onMouseEnter={(e) => {
+                  if (currentArtIndex < artQueue.length - 1) {
+                    e.currentTarget.style.background = 'rgba(255, 107, 53, 1)';
+                    e.currentTarget.style.transform = 'translateY(-50%) scale(1.1)';
+                    e.currentTarget.style.boxShadow = '0 8px 24px rgba(255, 107, 53, 0.4)';
+                  }
+                }}
+                onMouseLeave={(e) => {
+                  if (currentArtIndex < artQueue.length - 1) {
+                    e.currentTarget.style.background = 'rgba(255, 107, 53, 0.9)';
+                    e.currentTarget.style.transform = 'translateY(-50%) scale(1)';
+                    e.currentTarget.style.boxShadow = '0 4px 16px rgba(0, 0, 0, 0.3)';
+                  }
+                }}
+                title="Next artwork"
+                              >
+                  <ChevronRight size={20} />
+                </button>
+            )}
+
+            {/* Queue Info & Latest Button */}
+            {artQueue.length > 1 && !isFullscreen && (
+              <div style={{
+                position: 'absolute',
+                top: '20px',
+                left: '50%',
+                transform: 'translateX(-50%)',
+                background: 'rgba(35, 35, 35, 0.95)',
+                backdropFilter: 'blur(10px)',
+                border: '1px solid rgba(255, 107, 53, 0.3)',
+                borderRadius: '20px',
+                padding: '8px 16px',
+                display: 'flex',
+                alignItems: 'center',
+                gap: '12px',
+                boxShadow: '0 4px 20px rgba(0, 0, 0, 0.3)',
+                zIndex: 10
+              }}>
+                <div style={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '6px'
+                }}>
+                  <BookOpen size={12} style={{color: '#ff6b35'}} />
+                  <span style={{fontSize: '0.8rem', color: '#fff', fontWeight: 500}}>
+                    {currentArtIndex + 1} of {artQueue.length}
+                  </span>
+                </div>
+                <div style={{
+                  width: '1px',
+                  height: '16px',
+                  background: 'rgba(255, 255, 255, 0.2)'
+                }} />
+                <button 
+                  onClick={goToLatest}
+                  disabled={currentArtIndex >= artQueue.length - 1}
+                  style={{
+                    padding: '4px 8px',
+                    background: currentArtIndex >= artQueue.length - 1 ? 'rgba(51, 51, 51, 0.5)' : 'rgba(37, 99, 235, 0.9)',
+                    color: '#fff',
+                    border: 'none',
+                    borderRadius: '12px',
+                    cursor: currentArtIndex >= artQueue.length - 1 ? 'not-allowed' : 'pointer',
+                    fontSize: '0.7rem',
+                    fontWeight: 600,
+                    transition: 'all 0.2s ease',
+                    backdropFilter: 'blur(5px)'
+                  }}
+                  onMouseEnter={(e) => {
+                    if (currentArtIndex < artQueue.length - 1) {
+                      e.currentTarget.style.background = 'rgba(37, 99, 235, 1)';
+                      e.currentTarget.style.transform = 'scale(1.05)';
+                    }
+                  }}
+                  onMouseLeave={(e) => {
+                    if (currentArtIndex < artQueue.length - 1) {
+                      e.currentTarget.style.background = 'rgba(37, 99, 235, 0.9)';
+                      e.currentTarget.style.transform = 'scale(1)';
+                    }
+                  }}
+                  title="Go to latest artwork"
+                >
+                  Latest
+                </button>
+              </div>
+            )}
+
             {/* Fullscreen Button */}
             <button
               onClick={toggleFullscreen}
@@ -1810,14 +2130,18 @@ export default function App() {
               }}
               title={isFullscreen ? 'Exit Fullscreen' : 'Enter Fullscreen'}
             >
-              {isFullscreen ? '⤓' : '⤢'}
+              {isFullscreen ? <Minimize2 size={20} /> : <Maximize2 size={20} />}
             </button>
           </div>
         </main>
       </div>
 
-      {/* Bottom Preview Gallery */}
-      {artQueue.length > 0 && (
+
+
+
+
+      {/* Unified Gallery Section */}
+      {(artQueue.length > 0 || gallery.length > 0) && (
         <div style={{
           background: '#0f0f0f',
           borderTop: '2px solid #333',
@@ -1825,6 +2149,190 @@ export default function App() {
           marginTop: '40px',
           width: '100%'
         }}>
+          {/* Gallery Navigation Bar */}
+          <div style={{
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'space-between',
+            marginBottom: '20px',
+            padding: '0 20px'
+          }}>
+            {/* Left side - View tabs */}
+            <div style={{display: 'flex', alignItems: 'center', gap: '16px'}}>
+              <button
+                onClick={() => setGalleryView('queue')}
+                style={{
+                  padding: '8px 16px',
+                  background: galleryView === 'queue' ? '#ff6b35' : '#333',
+                  color: '#fff',
+                  border: 'none',
+                  borderRadius: '20px',
+                  cursor: 'pointer',
+                  fontSize: '14px',
+                  fontWeight: 500,
+                  transition: 'all 0.2s ease'
+                }}
+              >
+                Queue ({artQueue.length})
+              </button>
+              <button
+                onClick={() => setGalleryView('favorites')}
+                style={{
+                  padding: '8px 16px',
+                  background: galleryView === 'favorites' ? '#ff6b35' : '#333',
+                  color: '#fff',
+                  border: 'none',
+                  borderRadius: '20px',
+                  cursor: 'pointer',
+                  fontSize: '14px',
+                  fontWeight: 500,
+                  transition: 'all 0.2s ease'
+                }}
+              >
+                Favorites ({gallery.length})
+              </button>
+              <button
+                onClick={() => setGalleryView('listed')}
+                style={{
+                  padding: '8px 16px',
+                  background: galleryView === 'listed' ? '#ff6b35' : '#333',
+                  color: '#fff',
+                  border: 'none',
+                  borderRadius: '20px',
+                  cursor: 'pointer',
+                  fontSize: '14px',
+                  fontWeight: 500,
+                  transition: 'all 0.2s ease'
+                }}
+              >
+                Listed for Sale ({listedItems.size})
+              </button>
+            </div>
+
+            {/* Center - Selection info */}
+            <div style={{color: '#ccc', fontSize: '14px'}}>
+              {selectedGalleryItems.size > 0 ? `Selected only ${selectedGalleryItems.size}` : ''}
+            </div>
+
+                        {/* Right side - Selection and Bulk actions */}
+            <div style={{display: 'flex', alignItems: 'center', gap: '8px'}}>
+              {selectedGalleryItems.size > 0 ? (
+                <>
+                  <span style={{color: '#fff', fontSize: '14px'}}>
+                    Selected only {selectedGalleryItems.size}
+                  </span>
+                  <button
+                    onClick={() => {
+                      // Add selected items to favorites (save to gallery)
+                      const selectedItems = getCurrentGalleryItems().filter(item => 
+                        selectedGalleryItems.has(item.id)
+                      );
+                      selectedItems.forEach(item => {
+                        if (!gallery.find(g => g.id === item.id)) {
+                          const newGalleryItem = { 
+                            id: item.id,
+                            html: item.html,
+                            config: item.config,
+                            timestamp: item.timestamp,
+                            seed, 
+                            palette, 
+                            lint, 
+                            threadSpacing, 
+                            bgColor, 
+                            opaque,
+                            weaveStyle,
+                            artId: item.id 
+                          };
+                          setGallery(prev => {
+                            const updated = [...prev, newGalleryItem];
+                            localStorage.setItem('gallery', JSON.stringify(updated));
+                            return updated;
+                          });
+                        }
+                      });
+                      deselectAllGalleryItems();
+                    }}
+                    style={{
+                      padding: '8px 16px',
+                      background: '#333',
+                      color: '#fff',
+                      border: 'none',
+                      borderRadius: '20px',
+                      cursor: 'pointer',
+                      fontSize: '14px',
+                      fontWeight: 500,
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: '4px'
+                    }}
+                  >
+                    <Heart size={14} />
+                    Favorite {selectedGalleryItems.size} items
+                  </button>
+                  <button
+                    onClick={() => deleteGalleryItems(Array.from(selectedGalleryItems))}
+                    style={{
+                      padding: '8px 16px',
+                      background: '#dc2626',
+                      color: '#fff',
+                      border: 'none',
+                      borderRadius: '20px',
+                      cursor: 'pointer',
+                      fontSize: '14px',
+                      fontWeight: 500,
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: '4px'
+                    }}
+                  >
+                    <Trash2 size={14} />
+                    Delete {selectedGalleryItems.size} items
+                  </button>
+                  <button
+                    onClick={deselectAllGalleryItems}
+                    style={{
+                      padding: '8px 16px',
+                      background: '#333',
+                      color: '#fff',
+                      border: 'none',
+                      borderRadius: '20px',
+                      cursor: 'pointer',
+                      fontSize: '14px',
+                      fontWeight: 500,
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: '4px'
+                    }}
+                  >
+                    <X size={14} />
+                    Deselect all
+                  </button>
+                </>
+              ) : (
+                <button
+                  onClick={selectAllGalleryItems}
+                  style={{
+                    padding: '8px 16px',
+                    background: '#333',
+                    color: '#fff',
+                    border: 'none',
+                    borderRadius: '20px',
+                    cursor: 'pointer',
+                    fontSize: '14px',
+                    fontWeight: 500,
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: '4px'
+                  }}
+                >
+                  <Settings size={14} />
+                  Select all
+                </button>
+              )}
+            </div>
+          </div>
+
+          {/* Gallery Grid */}
           <div style={{
             display: 'grid',
             gridTemplateColumns: 'repeat(auto-fill, 275px)',
@@ -1832,46 +2340,78 @@ export default function App() {
             alignItems: 'center',
             justifyItems: 'center',
             minWidth: 'max-content',
-            padding: '0 20px',
+            padding: '20px',
             overflowX: 'auto',
             overflowY: 'hidden',
             justifyContent: 'center',
             margin: '0 auto'
           }}>
-            {artQueue.map((art, index) => (
-              <div
-                key={index}
-                onClick={() => setModalArt(art)}
+            {getCurrentGalleryItems().map((item, index) => {
+              const isSelected = selectedGalleryItems.has(item.id);
+              const isListed = listedItems.has(item.id);
+              const isQueueItem = galleryView === 'queue';
+              
+              return (
+                <div
+                  key={item.id}
                 style={{
                   width: '275px',
                   height: '275px',
-                  border: index === currentArtIndex ? '3px solid #ff6b35' : '2px solid #333',
+                    border: isSelected ? '3px solid #fff' : '2px solid #333',
                   borderRadius: '8px',
                   overflow: 'hidden',
                   cursor: 'pointer',
                   position: 'relative',
                   background: '#1a1a1a',
                   transition: 'all 0.2s ease',
-                  transform: index === currentArtIndex ? 'scale(1.05)' : 'scale(1)',
-                  boxShadow: index === currentArtIndex ? '0 8px 25px rgba(255, 107, 53, 0.3)' : '0 4px 12px rgba(0, 0, 0, 0.3)'
+                    transform: isSelected ? 'scale(1.05)' : 'scale(1)',
+                    boxShadow: isSelected ? '0 8px 25px rgba(255, 255, 255, 0.3)' : '0 4px 12px rgba(0, 0, 0, 0.3)'
                 }}
                 onMouseEnter={(e) => {
-                  e.currentTarget.style.transform = 'scale(1.1)';
+                    e.currentTarget.style.transform = 'scale(1.05)';
                   e.currentTarget.style.boxShadow = '0 12px 30px rgba(0, 0, 0, 0.4)';
+                    // Show action buttons
+                    const actionButtons = e.currentTarget.querySelector('[data-action-buttons]') as HTMLElement;
+                    if (actionButtons) {
+                      actionButtons.style.opacity = '1';
+                    }
                 }}
                 onMouseLeave={(e) => {
-                  e.currentTarget.style.transform = index === currentArtIndex ? 'scale(1.05)' : 'scale(1)';
-                  e.currentTarget.style.boxShadow = index === currentArtIndex ? '0 8px 25px rgba(255, 107, 53, 0.3)' : '0 4px 12px rgba(0, 0, 0, 0.3)';
-                }}
-              >
-                <div style={{
+                    e.currentTarget.style.transform = isSelected ? 'scale(1.05)' : 'scale(1)';
+                    e.currentTarget.style.boxShadow = isSelected ? '0 8px 25px rgba(255, 255, 255, 0.3)' : '0 4px 12px rgba(0, 0, 0, 0.3)';
+                    // Hide action buttons
+                    const actionButtons = e.currentTarget.querySelector('[data-action-buttons]') as HTMLElement;
+                    if (actionButtons) {
+                      actionButtons.style.opacity = '0';
+                    }
+                  }}
+                >
+                  {/* Artwork Preview */}
+                  <div 
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      if (e.ctrlKey || e.metaKey) {
+                        // Ctrl/Cmd + click for selection
+                        toggleGalleryItemSelection(item.id);
+                      } else {
+                        // Regular click for modal
+                        setModalArt(item);
+                        if (isQueueItem) {
+                          setModalIndex(artQueue.findIndex(a => a.id === item.id));
+                        } else {
+                          setModalIndex(getCurrentGalleryItems().findIndex(a => a.id === item.id));
+                        }
+                      }
+                    }}
+                    style={{
                   width: '100%',
                   height: '100%',
                   position: 'relative',
                   overflow: 'hidden'
-                }}>
+                    }}
+                  >
                   <iframe
-                    srcDoc={art.html}
+                      srcDoc={item.html}
                     style={{
                       width: '1024px',
                       height: '1024px',
@@ -1883,12 +2423,223 @@ export default function App() {
                       top: 0,
                       left: 0
                     }}
-                    title={`Artwork ${index + 1}`}
+                      title={`Gallery Artwork ${index + 1}`}
                   />
                 </div>
-                <div style={{
+
+
+
+                                    {/* Action Buttons - Top right side, vertical stack, hover-only */}
+                  <div 
+                    data-action-buttons
+                    style={{
                   position: 'absolute',
                   top: '8px',
+                      right: '8px',
+                      display: 'flex',
+                      flexDirection: 'column',
+                      gap: '4px',
+                      opacity: 0,
+                      transition: 'opacity 0.2s ease',
+                      zIndex: 10
+                    }}
+                  >
+                    {/* Select Button */}
+                    <button
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        toggleGalleryItemSelection(item.id);
+                      }}
+                      style={{
+                        width: '32px',
+                        height: '32px',
+                        background: selectedGalleryItems.has(item.id) ? 'rgba(255, 255, 255, 0.8)' : 'rgba(0, 0, 0, 0.3)',
+                        color: selectedGalleryItems.has(item.id) ? '#000' : '#fff',
+                        border: '1px solid rgba(255, 255, 255, 0.3)',
+                        borderRadius: '50%',
+                        cursor: 'pointer',
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                        fontSize: '16px',
+                        fontFamily: 'monospace',
+                        transition: 'all 0.2s ease'
+                      }}
+                      onMouseEnter={(e) => {
+                        e.currentTarget.style.background = selectedGalleryItems.has(item.id) ? 'rgba(255, 255, 255, 1)' : 'rgba(0, 0, 0, 0.6)';
+                        e.currentTarget.style.borderColor = 'rgba(255, 255, 255, 0.6)';
+                      }}
+                      onMouseLeave={(e) => {
+                        e.currentTarget.style.background = selectedGalleryItems.has(item.id) ? 'rgba(255, 255, 255, 0.8)' : 'rgba(0, 0, 0, 0.3)';
+                        e.currentTarget.style.borderColor = 'rgba(255, 255, 255, 0.3)';
+                      }}
+                      title={selectedGalleryItems.has(item.id) ? 'Deselect item' : 'Select item'}
+                    >
+                      <div style={{
+                        width: '12px',
+                        height: '12px',
+                        border: '1px solid currentColor',
+                        borderRadius: '50%',
+                        position: 'relative'
+                      }}>
+                        {selectedGalleryItems.has(item.id) && (
+                          <div style={{
+                            position: 'absolute',
+                            top: '50%',
+                            left: '50%',
+                            transform: 'translate(-50%, -50%)',
+                            width: '6px',
+                            height: '6px',
+                            background: 'currentColor',
+                            borderRadius: '50%'
+                          }} />
+                        )}
+                      </div>
+                    </button>
+
+                    {/* Make Favorite Button */}
+                    <button
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        // Add to favorites (save to gallery)
+                        if (!gallery.find(g => g.id === item.id)) {
+                          const newGalleryItem = { 
+                            id: item.id,
+                            html: item.html,
+                            config: item.config,
+                            timestamp: item.timestamp,
+                            seed, 
+                            palette, 
+                            lint, 
+                            threadSpacing, 
+                            bgColor, 
+                            opaque,
+                            weaveStyle,
+                            artId: item.id 
+                          };
+                          setGallery(prev => {
+                            const updated = [...prev, newGalleryItem];
+                            localStorage.setItem('gallery', JSON.stringify(updated));
+                            return updated;
+                          });
+                        }
+                      }}
+                      style={{
+                        width: '32px',
+                        height: '32px',
+                        background: gallery.find(g => g.id === item.id) ? 'rgba(255, 107, 53, 0.8)' : 'rgba(0, 0, 0, 0.3)',
+                        color: '#fff',
+                        border: '1px solid rgba(255, 255, 255, 0.3)',
+                        borderRadius: '50%',
+                        cursor: 'pointer',
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                        fontSize: '16px',
+                        fontFamily: 'monospace',
+                        transition: 'all 0.2s ease'
+                      }}
+                      onMouseEnter={(e) => {
+                        e.currentTarget.style.background = gallery.find(g => g.id === item.id) ? 'rgba(255, 107, 53, 1)' : 'rgba(0, 0, 0, 0.6)';
+                        e.currentTarget.style.borderColor = 'rgba(255, 255, 255, 0.6)';
+                      }}
+                      onMouseLeave={(e) => {
+                        e.currentTarget.style.background = gallery.find(g => g.id === item.id) ? 'rgba(255, 107, 53, 0.8)' : 'rgba(0, 0, 0, 0.3)';
+                        e.currentTarget.style.borderColor = 'rgba(255, 255, 255, 0.3)';
+                      }}
+                      title={gallery.find(g => g.id === item.id) ? 'Remove from favorites' : 'Add to favorites'}
+                    >
+                      <Heart size={16} />
+                    </button>
+
+                    {/* Delete Button */}
+                    <button
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        if (isQueueItem) {
+                          // Remove from queue
+                          setArtQueue(prev => prev.filter(a => a.id !== item.id));
+                        } else {
+                          // Remove from gallery
+                          deleteGalleryItems([item.id]);
+                        }
+                      }}
+                      style={{
+                        width: '32px',
+                        height: '32px',
+                        background: 'rgba(220, 38, 38, 0.3)',
+                        color: '#fff',
+                        border: '1px solid rgba(255, 255, 255, 0.3)',
+                        borderRadius: '50%',
+                        cursor: 'pointer',
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                        fontSize: '16px',
+                        fontFamily: 'monospace',
+                        transition: 'all 0.2s ease'
+                      }}
+                      onMouseEnter={(e) => {
+                        e.currentTarget.style.background = 'rgba(220, 38, 38, 0.8)';
+                        e.currentTarget.style.borderColor = 'rgba(255, 255, 255, 0.6)';
+                      }}
+                      onMouseLeave={(e) => {
+                        e.currentTarget.style.background = 'rgba(220, 38, 38, 0.3)';
+                        e.currentTarget.style.borderColor = 'rgba(255, 255, 255, 0.3)';
+                      }}
+                      title="Delete item"
+                    >
+                      <Trash2 size={16} />
+                    </button>
+
+                    {/* Use Traits Button */}
+                    <button
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        // Apply the item's traits to current generation
+                        if (item.config) {
+                          setSeed(item.config.seed || '');
+                          setPalette(item.config.palette || '');
+                          setLint(item.config.lint || '');
+                          setThreadSpacing(item.config.threadSpacing || '');
+                          setBgColor(item.config.bgColor || '#fff');
+                          setOpaque(item.config.opaque || false);
+                          setWeaveStyle(item.config.weaveStyle || '');
+                        }
+                      }}
+                      style={{
+                        width: '32px',
+                        height: '32px',
+                        background: 'rgba(0, 0, 0, 0.3)',
+                        color: '#fff',
+                        border: '1px solid rgba(255, 255, 255, 0.3)',
+                        borderRadius: '50%',
+                        cursor: 'pointer',
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                        fontSize: '16px',
+                        fontFamily: 'monospace',
+                        transition: 'all 0.2s ease'
+                      }}
+                      onMouseEnter={(e) => {
+                        e.currentTarget.style.background = 'rgba(0, 0, 0, 0.6)';
+                        e.currentTarget.style.borderColor = 'rgba(255, 255, 255, 0.6)';
+                      }}
+                      onMouseLeave={(e) => {
+                        e.currentTarget.style.background = 'rgba(0, 0, 0, 0.3)';
+                        e.currentTarget.style.borderColor = 'rgba(255, 255, 255, 0.3)';
+                      }}
+                      title="Use traits"
+                    >
+                      <Settings size={16} />
+                    </button>
+                  </div>
+
+                  {/* Item Number */}
+                  <div style={{
+                    position: 'absolute',
+                    bottom: '8px',
                   right: '8px',
                   background: '#ff6b35',
                   color: '#fff',
@@ -1905,65 +2656,11 @@ export default function App() {
                   {index + 1}
                 </div>
               </div>
-            ))}
+              );
+            })}
           </div>
         </div>
       )}
-
-      {/* Gallery Modal */}
-      {galleryOpen && (
-        <div className="EOL-dark-gallery-modal">
-          <button onClick={() => setGalleryOpen(false)}>Close Gallery</button>
-          <div className="EOL-dark-gallery-list">
-            {gallery.length === 0 ? (
-              <div>No saved variants yet.</div>
-            ) : (
-              gallery.map((item, idx) => (
-                <div key={idx} className="EOL-dark-gallery-item">
-                  <div>Seed: {item.seed}</div>
-                  <div>Palette: {item.palette}</div>
-                  <div>Fresh from Loom: {item.lint ? 'Yes' : 'No'}</div>
-                  <div>Background: {getBackgroundLabel(item.bgColor)}</div>
-                  <button onClick={() => {
-                    setSeed(item.seed);
-                    setPalette(item.palette);
-                    setLint(item.lint);
-                    setBgColor(item.bgColor);
-                    setOpaque(item.opaque);
-                    if (item.palette === 'Random Madras' && item.paletteColors) {
-                      setPaletteColors(item.paletteColors);
-                    } else {
-                      setPaletteColors(null);
-                    }
-                    setGalleryOpen(false);
-                    // Update the URL to reflect the loaded config
-                    updateURLWithConfig({
-                      seed: item.seed,
-                      palette: item.palette,
-                      paletteColors: item.palette === 'Random Madras' && item.paletteColors ? item.paletteColors : null,
-                      threadSpacing: item.threadSpacing,
-                      bgColor: item.bgColor,
-                      lint: item.lint,
-                      weaveStyle: item.weaveStyle || 'classic',
-                      opaque: item.opaque,
-                      threadVariance: item.weaveStyle === 'classic' ? 0.3 : 0,
-                      bitcoinMode,
-                      bitcoinSeedMode,
-                      bitcoinHash,
-                      bitcoinAddress,
-                      bitcoinDataMode,
-                      bitcoinDataParams,
-                      priceBasedArt,
-                      dynamicFadeMode
-                    });
-                  }}>Load</button>
-                </div>
-              ))
-            )}
-          </div>
-        </div>
-      )}
-      <button className="EOL-dark-gallery-open" onClick={() => setGalleryOpen(true)} style={{position:'fixed',bottom:24,right:24}}>Gallery</button>
 
       {modalArt && (
         <div style={{
@@ -2007,6 +2704,77 @@ export default function App() {
               position: 'relative',
               overflow: 'hidden'
             }}>
+              {/* Navigation Arrows */}
+              {modalIndex > 0 && (
+                <button
+                  onClick={goToPreviousModal}
+                  style={{
+                    position: 'absolute',
+                    left: 20,
+                    top: '50%',
+                    transform: 'translateY(-50%)',
+                    background: 'rgba(0,0,0,0.7)',
+                    color: '#fff',
+                    border: 'none',
+                    borderRadius: '50%',
+                    width: 48,
+                    height: 48,
+                    fontSize: 20,
+                    cursor: 'pointer',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    zIndex: 10,
+                    transition: 'all 0.2s ease'
+                  }}
+                  onMouseEnter={(e) => {
+                    e.currentTarget.style.background = 'rgba(0,0,0,0.9)';
+                    e.currentTarget.style.transform = 'translateY(-50%) scale(1.1)';
+                  }}
+                  onMouseLeave={(e) => {
+                    e.currentTarget.style.background = 'rgba(0,0,0,0.7)';
+                    e.currentTarget.style.transform = 'translateY(-50%) scale(1)';
+                  }}
+                >
+                  ←
+                </button>
+              )}
+              
+              {modalIndex < artQueue.length - 1 && (
+                <button
+                  onClick={goToNextModal}
+                  style={{
+                    position: 'absolute',
+                    right: 20,
+                    top: '50%',
+                    transform: 'translateY(-50%)',
+                    background: 'rgba(0,0,0,0.7)',
+                    color: '#fff',
+                    border: 'none',
+                    borderRadius: '50%',
+                    width: 48,
+                    height: 48,
+                    fontSize: 20,
+                    cursor: 'pointer',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    zIndex: 10,
+                    transition: 'all 0.2s ease'
+                  }}
+                  onMouseEnter={(e) => {
+                    e.currentTarget.style.background = 'rgba(0,0,0,0.9)';
+                    e.currentTarget.style.transform = 'translateY(-50%) scale(1.1)';
+                  }}
+                  onMouseLeave={(e) => {
+                    e.currentTarget.style.background = 'rgba(0,0,0,0.7)';
+                    e.currentTarget.style.transform = 'translateY(-50%) scale(1)';
+                  }}
+                >
+                  →
+                </button>
+              )}
+
               <div style={{
                 width: 'min(80vw, 80vh)',
                 height: 'min(80vw, 80vh)',
@@ -2032,7 +2800,7 @@ export default function App() {
                   }}
                   title="Gallery Artwork Preview"
                 />
-              </div>
+                </div>
             </div>
             {/* Traits Sidebar */}
             <div style={{
@@ -2104,6 +2872,28 @@ export default function App() {
                   style={{padding: '8px 16px', background: '#ff5c2a', color: '#fff', border: 'none', borderRadius: 6, fontWeight: 600, cursor: 'pointer'}}
                 >Copy Permalink</button>
                 <button
+                  onClick={() => {
+                    // Save current modal art to gallery
+                    const savedArt = {
+                      id: modalArt.id,
+                      html: modalArt.html,
+                      config: modalArt.config,
+                      timestamp: modalArt.timestamp
+                    };
+                    const existingGallery = JSON.parse(localStorage.getItem('gallery') || '[]');
+                    const isAlreadySaved = existingGallery.some((art: any) => art.id === savedArt.id);
+                    
+                    if (!isAlreadySaved) {
+                      existingGallery.push(savedArt);
+                      localStorage.setItem('gallery', JSON.stringify(existingGallery));
+                      alert('Saved to gallery!');
+                    } else {
+                      alert('Already saved in gallery!');
+                    }
+                  }}
+                  style={{padding: '8px 16px', background: '#2563eb', color: '#fff', border: 'none', borderRadius: 6, fontWeight: 600, cursor: 'pointer'}}
+                >💾 Save to Gallery</button>
+                <button
                   onClick={() => alert('Download coming soon!')}
                   style={{padding: '8px 16px', background: '#333', color: '#fff', border: 'none', borderRadius: 6, fontWeight: 600, cursor: 'pointer'}}
                 >Download</button>
@@ -2133,7 +2923,7 @@ export default function App() {
                     setModalArt(null);
                     setPendingGeneration(true);
                   }}
-                  style={{padding: '8px 16px', background: '#2563eb', color: '#fff', border: 'none', borderRadius: 6, fontWeight: 600, cursor: 'pointer'}}
+                  style={{padding: '8px 16px', background: '#059669', color: '#fff', border: 'none', borderRadius: 6, fontWeight: 600, cursor: 'pointer'}}
                 >Create with these traits</button>
               </div>
             </div>
@@ -2159,6 +2949,8 @@ export default function App() {
           </div>
         </div>
       )}
+
+
     </div>
   );
 }
