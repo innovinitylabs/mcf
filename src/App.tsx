@@ -2209,12 +2209,7 @@ export default function App() {
               </button>
             </div>
 
-            {/* Center - Selection info */}
-            <div style={{color: '#ccc', fontSize: '14px'}}>
-              {selectedGalleryItems.size > 0 ? `Selected only ${selectedGalleryItems.size}` : ''}
-            </div>
-
-                        {/* Right side - Selection and Bulk actions */}
+            {/* Right side - Selection and Bulk actions */}
             <div style={{display: 'flex', alignItems: 'center', gap: '8px'}}>
               {selectedGalleryItems.size > 0 ? (
                 <>
@@ -2322,7 +2317,9 @@ export default function App() {
                     fontWeight: 500,
                     display: 'flex',
                     alignItems: 'center',
-                    gap: '4px'
+                    gap: '4px',
+                    height: '36px',
+                    minWidth: 'fit-content'
                   }}
                 >
                   <Settings size={14} />
